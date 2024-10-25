@@ -13,14 +13,16 @@
 
 // L is row number, N is col number
 template <typename MatrixType>
-inline void matmul_internal(const MatrixType& M, DevicePrecision* d_M, const DevicePrecision* d_y, DevicePrecision* d_result, size_t NUM_ARRAYS, size_t L, size_t N, const DevicePrecision& alpha, const DevicePrecision& beta, cublasHandle_t& handle) {
+inline void matmul_internal(const MatrixType& M, DevicePrecision* d_M, const DevicePrecision* d_y, DevicePrecision* d_result, size_t NUM_ARRAYS, size_t L, size_t N, cublasHandle_t& handle) {
     size_t idx = 0;
-    constexpr bool isRowMajor = Matrix::IsRowMajor;
-    std::cout << L << " " << N << std::endl;
+    constexpr bool isRowMajor = MatrixType::IsRowMajor;
+    // std::cout << L << " " << N << std::endl;
     size_t& iterIndSize = (isRowMajor) ? L : N;
     size_t& axisArraySize = (isRowMajor) ? N : L;
     
     if (isRowMajor) {
+        constexpr DevicePrecision alpha = 1.0;
+        constexpr DevicePrecision beta = 0.0;
         while (idx < L) {
         size_t selectedRows = std::min(NUM_ARRAYS, L - idx);
         // std::cout << "Block Transfer " << selectedRows << " rows, starting from index " << idx << std::endl;
@@ -29,21 +31,13 @@ inline void matmul_internal(const MatrixType& M, DevicePrecision* d_M, const Dev
         idx += selectedRows;
         }
     } else {
-        bool batched = (NUM_ARRAYS < N);
-        DevicePrecision* tempResult = cudaMallocChecked<DevicePrecision>(N * PRECISION_SIZE);
+        constexpr DevicePrecision alpha = 1.0;
+        constexpr DevicePrecision beta = 1.0;
         while (idx < N) {
             size_t selectedCols = std::min(NUM_ARRAYS, N - idx);
             // std::cout << "Block Transfer " << selectedCols << " rows, starting from index " << idx << std::endl;
             cudaMemcpyChecked(d_M, M.data() + idx * L, selectedCols * L * PRECISION_SIZE, cudaMemcpyKind::cudaMemcpyHostToDevice);
-
-            CHECK_CUBLAS(cublasGemv(handle, CUBLAS_OP_N, L, selectedCols, &alpha, d_M, L, d_y + idx, 1, &beta, tempResult, 1));
-            if (batched) {
-            #ifdef PRECISION_FLOAT
-                CHECK_CUBLAS(cublasSaxpy(handle, L, &alpha, tempResult, 1, d_result, 1));
-                #elif PRECISION_DOUBLE
-                CHECK_CUBLAS(cublasDaxpy(handle, L, &alpha, tempResult, 1, d_result, 1)); 
-                #endif   
-            }  else {d_y = d_result;}
+            CHECK_CUBLAS(cublasGemv(handle, CUBLAS_OP_N, L, selectedCols, &alpha, d_M, L, d_y + idx, 1, &beta, d_result, 1));
             idx += selectedCols;
         }
     }
@@ -53,6 +47,7 @@ inline void matmul_internal(const MatrixType& M, DevicePrecision* d_M, const Dev
 using AmbigType = std::variant<Vector, DevicePrecision*>;
 template <typename MatrixType>
 AmbigType matmul(const MatrixType& M, const Vector& y, const CuRetType retType = CuRetType::HOST) {
+    std::cout << MatrixType::IsRowMajor << std::endl;
     CHECK_DIMS(M, y);
     size_t free_mem = 0;
     size_t total_mem = 0;
@@ -60,9 +55,7 @@ AmbigType matmul(const MatrixType& M, const Vector& y, const CuRetType retType =
     size_t N = 0; // Number of columns in M
     size_t L = 0; // Number of rows in M
     std::tie(L, N) = shape(M);
-    // CuBLAS GEMV variables
-    const DevicePrecision alpha = 1.0;
-    const DevicePrecision beta = 0.0;
+
     size_t idx = 0;
     const size_t& iterIndSize =  (MatrixType::IsRowMajor) ? N : L;
     size_t MAX_ALLOC = MAX_ROW_ALLOC(free_mem, iterIndSize);
@@ -78,7 +71,7 @@ AmbigType matmul(const MatrixType& M, const Vector& y, const CuRetType retType =
 
 
     cudaMemcpyChecked(d_y, y.data(), N * PRECISION_SIZE, cudaMemcpyKind::cudaMemcpyHostToDevice);
-    matmul_internal(M, d_M, d_y, d_result, MAX_ALLOC, L, N, alpha, beta, handle);
+    matmul_internal<MatrixType>(M, d_M, d_y, d_result, MAX_ALLOC, L, N, handle);
     cudaMemcpyChecked(h_result.data(), d_result, L * PRECISION_SIZE, cudaMemcpyKind::cudaMemcpyDeviceToHost);
     
     // Free device memory
@@ -96,8 +89,10 @@ AmbigType matmul(const MatrixType& M, const Vector& y, const CuRetType retType =
     }
 }
 
-inline Vector matmulHost(const Matrix& M, const Vector& y) {return std::get<Vector>(matmul(M, y, CuRetType::HOST));}
-inline DevicePrecision* matmulDevice(const Matrix& M, const Vector& y) {return std::get<DevicePrecision*>(matmul(M, y, CuRetType::DEVICE));}
+template <typename MatrixType>
+inline Vector matmulHost(const MatrixType& M, const Vector& y) {return std::get<Vector>(matmul<MatrixType>(M, y, CuRetType::HOST));}
+template <typename MatrixType>
+inline DevicePrecision* matmulDevice(const MatrixType& M, const Vector& y) {return std::get<DevicePrecision*>(matmul<MatrixType>(M, y, CuRetType::DEVICE));}
 
 
 

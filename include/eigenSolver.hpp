@@ -7,6 +7,7 @@
 #include <cusolverDn.h> // cuSolver
 #include <cuda_runtime.h>
 #include <Eigen/Dense>  // For generating matrices
+#include "vector.hpp"
 
 #define LAPACK_CHECK(func_call) \
     { \
@@ -17,101 +18,130 @@
         } \
     }
 
-// Function to generate a random upper Hessenberg matrix
-MatrixColMajor generateHessenbergMatrix(int n) {
-    MatrixColMajor A(n, n); // Create an n x n matrix
-
-    // Random number generation setup
-    std::random_device rd; // Obtain a random number generator from hardware
-    std::mt19937 gen(rd()); // Seed the generator
-    std::uniform_real_distribution<> dis(-1.0, 1.0); // Define the range for random values
-
-    // Fill the matrix with random values
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
-            A(i, j) = dis(gen); // Assign a random value in the range [-1, 1]
-        }
-    }
-    for (int i = 2; i < n; ++i) {
-        for (int j = 0; j < i - 1; ++j) {
-            A(i, j) = 0.0;
-        }
-    }
-    return A;
-}
-
 // Timing helper
 using Clock = std::chrono::high_resolution_clock;
 
-// LAPACK-based Schur decomposition (shseqr)
-// Pass Upper Hessenberg Mat & Size
-// Pass junk copy of Matrix
-std::pair<ComplexVector, ComplexMatrix> HessenbergEigenvaluesAndVectors(MatrixColMajor& A, const size_t& n) {
-    Vector H = Eigen::Map<Vector>(A.data(), A.size()); // LAPACK expects column-major data
-    Vector wr(n), wi(n), Z(n * n);
-    Vector work(3*n);
-    
+template <typename MatType>
+std::tuple<ComplexVector, MatType> lapack_hessenberg_eigSolver(const MatType& H, const size_t& n) {
+    constexpr bool isRowMajor = MatType::IsRowMajor;
+    constexpr size_t LAPACK_MAT_TYPE = (isRowMajor) ? LAPACK_ROW_MAJOR : LAPACK_COL_MAJOR;
     constexpr char job = 'S'; // Compute Schur & Eigenvalues
     constexpr char compz = 'I';
-    constexpr char side = 'R'; /// Right Evecs
-    constexpr char howmny = 'B'; // All evecs
-
-    int lda = n;
-
-    LAPACK_CHECK(EigenSolver(LAPACK_COL_MAJOR, job, compz, n, 1, n, H.data(), lda, wr.data(), wi.data(), Z.data(), lda));
+    constexpr char side = 'R'; // Right Eigenvectors
+    constexpr char howmny = 'B'; // All eigenvectors
     
-    
-    IntVector select(n, 1);  // Compute all eigenvectors
-    Vector VL(1);  // Not referenced for right eigenvectors
+    MatType H_copy = H;
+    MatType Z(n, n);
+    Vector wr(n), wi(n);
+    Vector work(3 * n);
+    IntVector select(n); 
+    select.setOnes(); // Compute all eigenvectors
+    Vector VL(1); // Not used for right eigenvectors
     Vector VR(n * n);
     int ldvl = 1, ldvr = n;
     int mm = n, m;
 
+
+
+    int lda = n;
+
+    // First, compute Schur decomposition and eigenvalues
+    LAPACK_CHECK(EigenSolver(LAPACK_MAT_TYPE, job, compz, n, 1, n, H_copy.data(), lda, wr.data(), wi.data(), Z.data(), lda));
     #ifdef PRECISION_FLOAT
-        LAPACK_CHECK(LAPACKE_strevc(LAPACK_COL_MAJOR, side, howmny, select.data(),
-                                    n, H.data(), lda, nullptr, 1, Z.data(), ldvr, n,
+        LAPACK_CHECK(LAPACKE_strevc(LAPACK_MAT_TYPE, side, howmny, select.data(),
+                                    n, H_copy.data(), lda, nullptr, 1, Z.data(), ldvr, n,
                                     &m));
     #elif PRECISION_DOUBLE
-        LAPACK_CHECK(LAPACKE_dtrevc(LAPACK_COL_MAJOR, side, howmny, select.data(),
-                                    n, H.data(), lda, nullptr, 1, Z.data(), ldvr, n,
-                                    &m))
+        LAPACK_CHECK(LAPACKE_dtrevc(LAPACK_MAT_TYPE, side, howmny, select.data(),
+                                    n, H_copy.data(), lda, nullptr, n, Z.data(), ldvr, n,
+                                    &m));
     #endif
 
-
-        // Construct complex eigenvalues and eigenvectors
     ComplexVector evals(n);
-    ComplexMatrix evecs(n, n);
+    for (int i = 0; i < n; i++) {evals[i] = ComplexNumber(wr[i], wi[i]);}
+    if (isRowMajor) {Z.transposeInPlace();}
 
-    for (size_t i = 0; i < n; ++i) {
-        evals[i] = std::complex<HostPrecision>(wr[i], wi[i]);
-        if (wi[i] == 0.0) {
-            // Real eigenvalue
-            for (size_t j = 0; j < n; ++j) {
-                evecs(j, i) = Z[j * n + i];
-            }
-        } // Consciously not storing any complex conjugate pairs as we hope to keep only real vecs
+    return std::make_tuple(evals, Z);
+}
+
+// LAPACK-based Schur decomposition (shseqr)
+// Pass Upper Hessenberg Mat & Size
+// Pass junk copy of Matrix
+template <typename MatType> 
+RealEigenPairs<MatType> eigenSolver(const MatType& A) {
+    const size_t& N = A.cols();
+    constexpr bool isRowMajor = MatType::IsRowMajor;
+
+    #define LAPACK_EIGSOLVER
+    //#define EIGEN_EIGSOLVER    
+
+    #ifdef EIGEN_EIGSOLVER
+    Eigen::EigenSolver<MatType> solver(A);
+    ComplexVector eigenvals = solver.eigenvalues();
+    // using ComplexMatType = std::conditional_t<isRowMajor,
+    //                                           ComplexRowMajorMatrix,
+    //                                           ComplexColMajorMatrix>;
+
+    MatType eigenvecs = solver.eigenvectors().real();
+    if (isRowMajor) {eigenvecs.transposeInPlace();}
+    #endif
+    #ifdef LAPACK_EIGSOLVER
+    ComplexVector eigenvals(N);
+    MatType eigenvecs(N, N);
+    std::tie(eigenvals, eigenvecs) = lapack_hessenberg_eigSolver(A, N);
+    #endif
+    size_t num_non_zero = 0;
+    // print(eigenvals);
+    // print(eigenvecs);
+
+    for (int i = 0; i < eigenvecs.cols(); ++i) {
+        if (eigenvals[i].imag() != 0.0) {
+            eigenvals[i] = 0.0;
+            if (isRowMajor) {eigenvecs.row(i) = Vector::Zero(N);}
+            else {eigenvecs.col(i) = Vector::Zero(N);}
+        }
+        else {
+        // #define DEBUG
+        #ifdef DEBUG
+        ComplexVector evec(N);
+        if (isRowMajor) {evec = eigenvecs.row(i);}
+        else {eigenvecs.col(i);}
+        ComplexVector result = A * evec - eigenvals(i) * evec;
+        double norm = result.norm();
+        std::cout << "Norm of column " << i << ": " << norm << std::endl;
+        #endif
+        num_non_zero++;
+    }
     }
 
 
-    // Sort eigenvalues and eigenvectors by magnitude of eigenvalues
-    IntVector idx(n);
+
+    Vector rEvals(N);
+    rEvals = eigenvals.real();
+
+    IntVector idx(N);
     std::iota(idx.begin(), idx.end(), 0);
     std::sort(idx.begin(), idx.end(),
-          [&evals](size_t i1, size_t i2) {
-              return std::norm(evals[i1]) > std::norm(evals[i2]);
+          [&rEvals](size_t i1, size_t i2) {
+              return std::norm(rEvals[i1]) > std::norm(rEvals[i2]);
           });
 
-    ComplexVector sorted_evals(n);
-    ComplexMatrix sorted_evecs(n, n);
-    for (size_t i = 0; i < n; ++i) {
-        sorted_evals[i] = evals[idx[i]];
-        for (size_t j = 0; j < n; ++j) {
-            sorted_evecs(j, i) = evecs(j, idx[i]);  // This line is changed
+    Vector sorted_evals(N);
+    MatType sorted_evecs(N, N);
+    size_t count = 0;
+    for (size_t i = 0; i < N; ++i) {
+        sorted_evals[i] = rEvals[idx[i]];
+        if constexpr (MatType::IsRowMajor) {
+            sorted_evecs.row(i) = eigenvecs.row(idx[i]);
+        } else {
+            sorted_evecs.col(i) = eigenvecs.col(idx[i]);
+
         }
     }
 
-    return {sorted_evals, sorted_evecs};
+    std::cout << num_non_zero << std::endl;
+    if (isRowMajor) {return {sorted_evals.head(num_non_zero), sorted_evecs.block(0, 0, num_non_zero, N), num_non_zero};}
+    else {return {sorted_evals.head(num_non_zero), sorted_evecs.block(0, 0, N, num_non_zero), num_non_zero};}
 }
-
 
 #endif // EIGENSOLVER_HPP

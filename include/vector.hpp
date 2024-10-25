@@ -30,27 +30,25 @@
 #endif
 
 using ComplexNumber = std::complex<HostPrecision>;
-using DeviceComplex = cuComplex;
 constexpr size_t PRECISION_SIZE = sizeof(HostPrecision);
 
 
 // Conditional type definitions based on USE_EIGEN
 #ifdef USE_EIGEN
     #include <eigen3/Eigen/Dense>
-    template<typename Precision = HostPrecision, int Rows = Eigen::Dynamic, int Cols = Eigen::Dynamic, int StorageOrder = Eigen::ColMajor>
-    using MatrixGeneric = Eigen::Matrix<Precision, Rows, Cols, StorageOrder>;
 
     // Vector (Column vector)
-    using Vector = MatrixGeneric<HostPrecision, Eigen::Dynamic, 1>; // Dynamic rows, single column
-    using ComplexVector = MatrixGeneric<std::complex<HostPrecision>, Eigen::Dynamic, 1>; // Complex column vector
-    using IntVector = MatrixGeneric<int, Eigen::Dynamic, 1>; // Integer column vector
+   using Vector = Eigen::Matrix<HostPrecision, Eigen::Dynamic, 1>; // Dynamic rows, single column
+    using ComplexVector = Eigen::Matrix<std::complex<HostPrecision>, Eigen::Dynamic, 1>; // Complex column vector
+    using IntVector = Eigen::Matrix<int, Eigen::Dynamic, 1>; // Integer column vector
 
     // Dynamic matrices
-    using Matrix = MatrixGeneric<>;  // Defaults to HostPrecision and ColMajor (Eigen::Dynamic x Eigen::Dynamic)
-    using ComplexMatrix = MatrixGeneric<std::complex<HostPrecision>, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Complex matrix
+    using Matrix = Eigen::Matrix<HostPrecision, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Default column-major matrix
+    using ComplexMatrix = Eigen::Matrix<std::complex<HostPrecision>, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Complex matrix
     using MatrixRowMajor = Eigen::Matrix<HostPrecision, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>; // Row-major matrix
     using MatrixColMajor = Eigen::Matrix<HostPrecision, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Column-major matrix
-
+    using ComplexRowMajorMatrix = Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    using ComplexColMajorMatrix = ComplexMatrix;
     // Mapped types (Eigen::Map)
     using VectorMap = Eigen::Map<Vector>;
     using VectorMapConst = Eigen::Map<const Vector>;
@@ -104,22 +102,20 @@ void print(const MatrixType& mat, size_t n = std::numeric_limits<size_t>::max())
         std::cout << "Vector (" << mat.size() << "):\n";
         n = std::min(n, static_cast<size_t>(mat.size())); // Limit rows
         for (size_t i = 0; i < n; ++i) {
-            printScalar(mat(i));
+            printScalar(mat(i));  // Assuming `printScalar` is defined for the scalar type
+            std::cout << " ";
         }
         std::cout << "\n";
     } else {
         // Handle matrices
         std::cout << "Matrix (" << mat.rows() << "x" << mat.cols() << ") - ";
-        if constexpr (isRowMajor) {
-            std::cout << "Row-major\n";
-        } else {
-            std::cout << "Col-major\n";
-        }
-
+        if constexpr (isRowMajor) {std::cout << "Row-major\n";}
+        else {std::cout << "Col-major\n";}
         n = std::min(n, static_cast<size_t>(mat.rows())); // Limit rows
         for (size_t i = 0; i < n; ++i) {
             for (int j = 0; j < mat.cols(); ++j) {
                 printScalar(mat(i, j));
+                std::cout << " ";
             }
             std::cout << "\n";
         }
@@ -170,6 +166,14 @@ void print(const MatrixType& mat, size_t n = std::numeric_limits<size_t>::max())
 
 
 #endif
+
+// Eigen/Ritz Pair Struct
+template <typename MatrixType>
+struct RealEigenPairs {
+    Vector values;
+    MatrixType vectors;
+    size_t num_pairs;
+};
 
 using Shape = std::pair<size_t, size_t>;
 Shape shape(const Matrix& M) {

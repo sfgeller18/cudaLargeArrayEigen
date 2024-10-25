@@ -5,6 +5,9 @@
     #include <cublas_v2.h>
     #include <cusolverDn.h>
 
+    using DeviceComplex = cuComplex;
+
+
     enum class CuRetType {
         HOST,
         DEVICE

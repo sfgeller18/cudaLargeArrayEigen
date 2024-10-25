@@ -14,7 +14,8 @@ constexpr size_t MAX_EVEC_ON_DEVICE = 1000;
 
 struct ArnoldiPair { MatrixColMajor Q; MatrixColMajor H_tilde; size_t m;};
 
-ArnoldiPair arnoldiEigen(const Matrix& M, const size_t& max_iters, const HostPrecision& tol) {
+template <typename MatrixType>
+ArnoldiPair arnoldiEigen(const MatrixType& M, const size_t& max_iters, const HostPrecision& tol) {
     size_t N, L; //N=num_rows, L=num_cols
     std::tie(N, L) = shape(M);
     Vector v0 = randVecGen(N);
@@ -59,20 +60,23 @@ constexpr DevicePrecision alpha = 1.0;
 constexpr DevicePrecision beta = 0.0;
 constexpr DevicePrecision neg_one = -1.0;
 
+std::cout << "HAHA" << std::endl;
+
 for (int i = 0; i < max_iters; i++) {  // Changed to start from 0
-
-    matmul_internal(M, d_M, d_y, d_result, ROWS, N, L, alpha, beta, handle);
-
+    matmul_internal<MatrixType>(M, d_M, d_y, d_result, ROWS, N, L, handle);
+    MatrixType M_holder(N, L);
+    cudaMemcpyChecked(M_holder.data(), d_M, N * L * PRECISION_SIZE, cudaMemcpyDeviceToHost);
     // Compute co-linearities w/ previous basis vectors
     cublasGemv(handle, CUBLAS_OP_T, N, i + 1, &alpha, d_evecs, N, d_result, 1, &beta, &d_h[i * (max_iters + 1)], 1);
 
     // Subtract co-linearities from new result vector
     cublasGemv(handle, CUBLAS_OP_N, N, i + 1, &neg_one, d_evecs, N, &d_h[i * (max_iters + 1)], 1, &alpha, d_result, 1);
 
-    MatrixColMajor h_res(max_iters + 1, max_iters);
+    MatrixType h_res(max_iters + 1, max_iters);
     cudaMemcpyChecked(h_res.data(), d_h,  (max_iters + 1) * max_iters * sizeof(HostPrecision), cudaMemcpyDeviceToHost);
     // print(h_res);
 
+    // TO-DO: FUCNTION PTR THIS BAD BOY
     #ifdef PRECISION_FLOAT
     cublasSnrm2(handle, L, d_result, 1, &norms[i]);
     #elif PRECISION_DOUBLE
@@ -119,7 +123,18 @@ return ArnoldiPair(Q, H_tilde, m+1);
 
 }
 
-std::pair<ComplexVector, MatrixColMajor> computeRitzPairs(const Matrix& M, const size_t& max_iters, const HostPrecision& tol) {
+
+
+//PARAMETERS:
+// const MatrixType& M: Matrix to compute Ritz pairs on
+// const size_t& max_iters: Maximum number of basis vectors to compute
+// const size_t& basis_size: Number of ritzpairs to return
+// const HostPrecison& tol: Breakpoint for ritzvalue size
+template <typename MatrixType>
+RealEigenPairs<MatrixType> computeRitzPairs(const MatrixType& M, const size_t& max_iters, const size_t& basis_size, const HostPrecision& tol=1e-5) {
+    size_t C = 0; // Number of columns in M
+    size_t R = 0; // Number of rows in M
+    std::tie(R, C) = shape(M);
     // Step 1: Perform Arnoldi iteration to get Q and H_tilde
     ArnoldiPair arnoldiResult = arnoldiEigen(M, max_iters, tol);
     const MatrixColMajor& Q = arnoldiResult.Q;
@@ -127,52 +142,44 @@ std::pair<ComplexVector, MatrixColMajor> computeRitzPairs(const Matrix& M, const
     MatrixColMajor H_square = arnoldiResult.H_tilde.block(0, 0, m, m);
 
     // Sorted evals and corresponding evecs
-    std::pair<ComplexVector, ComplexMatrix> H_eigensolution = HessenbergEigenvaluesAndVectors(H_square, m);
+    RealEigenPairs<MatrixType> H_eigensolution = eigenSolver<MatrixColMajor>(H_square);
 
-    const ComplexVector& eigenvalues = H_eigensolution.first;
-    const ComplexMatrix& eigenvectors = H_eigensolution.second;
-
-    MatrixColMajor eigenvectors_real(Q.rows(), eigenvectors.cols());
-    for (int i = 0; i < eigenvectors.rows(); ++i) {
-        for (int j = 0; j < eigenvectors.cols(); ++j) {
-            eigenvectors_real(i, j) = eigenvectors(i, j).real();  // Extract real part of each complex number
-        }
-    }
+    const Vector& eigenvalues = H_eigensolution.values;
+    const MatrixType& eigenvectors = H_eigensolution.vectors;
+    const size_t& num_eigen_pairs = H_eigensolution.num_pairs;
 
     // Allocate memory on the device for Q, eigenvectors_real, and the result
-    DevicePrecision* d_Q = cudaMallocChecked<DevicePrecision>(Q.size() * PRECISION_SIZE);
-    DevicePrecision* d_eigenvectors_real = cudaMallocChecked<DevicePrecision>(eigenvectors_real.size() * PRECISION_SIZE);
-    DevicePrecision* d_RitzVectors = cudaMallocChecked<DevicePrecision>(Q.rows() * eigenvectors_real.cols() * PRECISION_SIZE);
+    if (Q.size() > 1e7) {    
+        DevicePrecision* d_Q = cudaMallocChecked<DevicePrecision>(Q.size() * PRECISION_SIZE);
+        DevicePrecision* d_evecs = cudaMallocChecked<DevicePrecision>(eigenvectors.size() * PRECISION_SIZE);
+        DevicePrecision* d_RitzVectors = cudaMallocChecked<DevicePrecision>(Q.rows() * num_eigen_pairs * PRECISION_SIZE);
 
-    // Copy Q and eigenvectors_real to the device
-    cudaMemcpyChecked(d_Q, Q.data(), Q.size() * PRECISION_SIZE, cudaMemcpyHostToDevice);
-    cudaMemcpyChecked(d_eigenvectors_real, eigenvectors_real.data(), eigenvectors_real.size() * PRECISION_SIZE, cudaMemcpyHostToDevice);
+        // Copy Q and eigenvectors_real to the device
+        cudaMemcpyChecked(d_Q, Q.data(), Q.size() * PRECISION_SIZE, cudaMemcpyHostToDevice);
+        cudaMemcpyChecked(d_evecs, eigenvectors.data(), eigenvectors.size() * PRECISION_SIZE, cudaMemcpyHostToDevice);
 
-    // Create CUBLAS handle
-    cublasHandle_t handle;
-    cublasCreate(&handle);
+        // Create CUBLAS handle
+        cublasHandle_t handle;
+        cublasCreate(&handle);
 
-    // Define alpha and beta for the matrix multiplication
-    constexpr DevicePrecision alpha = 1.0;
-    constexpr DevicePrecision beta = 0.0;
+        cudaFree(d_Q);
+        cudaFree(d_evecs);
+        cudaFree(d_RitzVectors);
+        cublasDestroy(handle);
 
-    // Step 4: Perform the matrix multiplication Q * eigenvectors_real using cublasGemv
-    for (size_t i = 0; i < eigenvectors_real.cols(); ++i) {
-        cublasGemv(handle, CUBLAS_OP_N, Q.rows(), Q.cols(), &alpha, d_Q, Q.rows(), &d_eigenvectors_real[i * Q.cols()], 1, &beta, &d_RitzVectors[i * Q.rows()], 1);
+        // Add matmul internal once the Mat/Mat operation is implemented
     }
 
+    MatrixType RitzVectors = Q.block(0, 0, m, m) * ((MatrixType::IsRowMajor) ? eigenvectors.transpose() : eigenvectors);
     // Copy the result back to the host
-    Matrix RitzVectors(Q.rows(), eigenvectors_real.cols());
-    cudaMemcpyChecked(RitzVectors.data(), d_RitzVectors, RitzVectors.size() * PRECISION_SIZE, cudaMemcpyDeviceToHost);
+    // MatrixColMajor RitzVectors(Q.rows(), eigenvectors_real.cols());
+    // cudaMemcpyChecked(RitzVectors.data(), d_RitzVectors, RitzVectors.size() * PRECISION_SIZE, cudaMemcpyDeviceToHost);
 
     // Step 5: Free device memory and destroy CUBLAS handle
-    cudaFree(d_Q);
-    cudaFree(d_eigenvectors_real);
-    cudaFree(d_RitzVectors);
-    cublasDestroy(handle);
+
 
     // // Return Ritz values (eigenvalues) and Ritz vectors (the result of Q * real(eigenvectors))
-    return {eigenvalues, RitzVectors};
+    return {eigenvalues, RitzVectors, m};
 }
 
 #endif // ARNOLDI_HPP
