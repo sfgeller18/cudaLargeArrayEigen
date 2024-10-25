@@ -1,3 +1,0 @@
-/home/sfg18/projects/neurocpp/build/CMakeFiles/cuda_demo.dir
-/home/sfg18/projects/neurocpp/build/CMakeFiles/edit_cache.dir
-/home/sfg18/projects/neurocpp/build/CMakeFiles/rebuild_cache.dir

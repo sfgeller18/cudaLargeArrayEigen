@@ -1,1 +1,0 @@
-  -L"/opt/cuda/targets/x86_64-linux/lib/stubs"  -L"/opt/cuda/targets/x86_64-linux/lib"  -L"/usr/lib/gcc/x86_64-pc-linux-gnu/13.3.0"  /opt/cuda/lib64/libcudart_static.a -ldl /usr/lib/librt.a  -llapack -llapacke -lblas -lcudadevrt -lcudart_static -lrt -lpthread 
