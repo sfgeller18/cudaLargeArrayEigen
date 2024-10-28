@@ -29,7 +29,7 @@
     #error "No precision defined! Please define PRECISION_FLOAT, PRECISION_DOUBLE, or PRECISION_FLOAT16."
 #endif
 
-using ComplexNumber = std::complex<HostPrecision>;
+using ComplexType = std::complex<HostPrecision>;
 constexpr size_t PRECISION_SIZE = sizeof(HostPrecision);
 
 
@@ -84,7 +84,7 @@ constexpr size_t PRECISION_SIZE = sizeof(HostPrecision);
 
 template <typename Scalar>
 void printScalar(const Scalar& value) {
-    if constexpr (std::is_same_v<Scalar, ComplexNumber> || std::is_same_v<Scalar, std::complex<double>>) {
+    if constexpr (std::is_same_v<Scalar, ComplexType> || std::is_same_v<Scalar, std::complex<double>>) {
         std::cout << "(" << value.real() << ", " << value.imag() << ") ";
     } else {
         std::cout << value << " ";

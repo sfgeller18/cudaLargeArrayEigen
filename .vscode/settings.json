@@ -78,6 +78,9 @@
         "typeindex": "cpp",
         "valarray": "cpp",
         "core": "cpp",
-        "specialfunctions": "cpp"
+        "specialfunctions": "cpp",
+        "csignal": "cpp",
+        "any": "cpp",
+        "codecvt": "cpp"
     }
 }

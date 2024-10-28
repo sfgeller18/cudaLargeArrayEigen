@@ -1,50 +1,161 @@
 #ifndef TESTS_HPP
 #define TESTS_HPP
 
-    #include <iostream>
-    #include <cstring>
     #include "vector.hpp"
     #include "eigenSolver.hpp"
     #include "arnoldi.hpp"
     #include "matmul.hpp"
-    #include <chrono>
-    #include <cmath>
+    #include "shift.hpp"
 
 
-    template <typename MatType>
-    MatType generateRandomHessenbergMatrix(size_t N) {
-        MatType H = MatType::Random(N, N);
-        // Zero out elements below the first subdiagonal
-        for (size_t i = 2; i < N; ++i) {
-            for (size_t j = 0; j < i - 1; ++j) {
-                H(i, j) = 0.0;
-            }
-        }
-        return H;
-    }
-
-    bool is_approx_equal(const Vector& a, const Vector& b, float epsilon = 1e-2) {
-        if (a.size() != b.size()) return false;
-        for (size_t i = 0; i < a.size(); ++i) {
-            if (std::abs(a[i] - b[i]) > epsilon) {
-                return false;
-            }
-        }
-        return true;
-    }
+    #include "utils.hpp"
 
     
-    // Helper function to check if a vector is zero
-    bool isZeroVector(const Vector& vec, const double tol = 1e-10) {
-        return vec.norm() < tol;
+// ============================= SHIFTING TESTS =============================
+
+
+// int shiftTests() {
+//     const size_t& N = 10;
+//     Matrix M = generateRandomHessenbergMatrix<Matrix>(N);
+//     ComplexMatrix complex_M = M;
+//     ComplexVector eigenvalues(N);
+//     Matrix eigenvecs(N, N);
+//     eigen_eigsolver(M, eigenvalues, eigenvecs);
+//     ComplexMatrix S = ComplexMatrix::Identity(N,N);
+//     computeShift(S, complex_M, eigenvalues, N, int(N/2));
+//     print(S);
+//     return 0;
+// }
+
+// ============================= RITZ PAIR TESTS =============================
+
+template <typename MatrixType>
+void testRitzPairs(const MatrixType& M, size_t max_iters, size_t basis_size, HostPrecision tol = 1e-5) {
+    // Compute Ritz pairs
+    constexpr bool isRowMajor = MatrixType::IsRowMajor;
+    RealEigenPairs<MatrixType> ritzPairs = computeRitzPairs<MatrixType>(M, max_iters, basis_size, tol);
+    const Vector& ritzValues = ritzPairs.values;      // Ritz eigenvalues
+    const MatrixType& ritzVectors = ritzPairs.vectors; // Ritz eigenvectors
+
+    // Calculate matrix norm once
+    HostPrecision matrix_norm = M.norm();
+    
+    // Verify each Ritz pair
+    for (size_t i = 0; i < ritzValues.size(); ++i) {
+        const HostPrecision& eigenvalue = ritzValues[i];
+        Matrix H_shifted = M - eigenvalue * Matrix::Identity(ritzVectors.rows(), ritzVectors.rows());
+        
+        // Get current eigenvector
+        Vector current_vector;
+        if (isRowMajor) {
+            current_vector = ritzVectors.row(i).transpose();
+        } else {
+            current_vector = ritzVectors.col(i);
+        }
+        
+        // Calculate residual and its norm
+        Vector residual = H_shifted * current_vector;
+        HostPrecision residual_norm = residual.norm();
+        HostPrecision vector_norm = current_vector.norm();
+        
+        // Calculate relative residuals
+        HostPrecision relative_residual = residual_norm / (matrix_norm * vector_norm);
+        HostPrecision scaled_residual = residual_norm / matrix_norm;
+        
+        // Output the results
+        std::cout << "Ritz pair " << i + 1 << ":" << std::endl;
+        std::cout << "  Ritz value: " << eigenvalue << std::endl;
+        std::cout << "  Absolute residual norm: " << residual_norm << std::endl;
+        std::cout << "  Relative residual (||Ax - λx||/(||A|| ||x||)): " << relative_residual << std::endl;
+        std::cout << "  Scaled residual (||Ax - λx||/||A||): " << scaled_residual << std::endl;
+        std::cout << "  Matrix norm: " << matrix_norm << std::endl;
+        std::cout << "  Vector norm: " << vector_norm << std::endl;
+        std::cout << std::endl;
+    }
+}
+
+template <size_t MAX_ITERS>
+int ArnoldiTest(int argc, char* argv[]) {
+    size_t matrixSize = (argc > 1) ? std::stoi(argv[1]) : 100; // Use the input size, or default to 100
+    size_t max_iters = (matrixSize < 10 * MAX_ITERS) ? matrixSize / 10 : MAX_ITERS;
+    size_t basis_size = 10;
+
+    // Create a test matrix M of size matrixSize
+    MatrixColMajor M = MatrixColMajor::Random(matrixSize, matrixSize);
+
+    // Start timing
+    auto start = std::chrono::high_resolution_clock::now();
+
+    // Run the test function
+    testRitzPairs(M, max_iters, basis_size);
+
+    // End timing
+    auto end = std::chrono::high_resolution_clock::now();
+
+    // Calculate duration in milliseconds
+    std::chrono::duration<double, std::milli> duration = end - start;
+
+    std::cout << "Time taken: " << duration.count() << " ms" << std::endl;
+
+    return 0;
+}
+
+
+// ============================= KRYLOV ITERATION TESTS =============================
+
+
+    template <typename MatrixType>
+    bool checkOrthonormality(const MatrixType& Q, double tol = 1e-10) {
+        using Scalar = typename MatrixType::Scalar;
+        const size_t N = Q.cols();
+        MatrixType product(N, N);
+
+        if constexpr (std::is_same_v<Scalar, std::complex<double>>) {
+            product = Q.adjoint() * Q;
+        } else {
+            product = Q.transpose() * Q;
+        }
+
+        bool ret = (product - MatrixType::Identity(Q.cols(), Q.cols())).norm() < tol;
+        std::cout << (ret ? "SUCCESS" : "FAIL") << std::endl;
+        return ret;
     }
 
-    // Helper function to check if two vectors are parallel
-    bool areVectorsParallel(const Vector& v1, const Vector& v2, const double tol = 1e-10) {
-        if (isZeroVector(v1) || isZeroVector(v2)) return false;
-        Vector normalized1 = v1.normalized();
-        Vector normalized2 = v2.normalized();
-        return std::abs(std::abs(normalized1.dot(normalized2)) - 1.0) < tol;
+    int iterationTest(int argc, char** argv) {
+        // Check for the correct number of arguments
+        if (argc < 2) {
+            std::cerr << "Usage: " << argv[0] << " <matrix_size>" << std::endl;
+            return EXIT_FAILURE;
+        }
+
+        // Parse the matrix size from command line arguments
+        size_t N = std::atoi(argv[1]);
+
+        // Generate a random matrix of size N x N
+        MatrixColMajor M = MatrixColMajor::Random(N, N);
+
+        // Set parameters for the Ritz pair computation
+        size_t max_iters = 100; // Example maximum iterations
+        size_t basis_size = 10; // Example basis size
+        double tol = 1e-5;      // Tolerance for convergence
+
+        // // Call the computeRitzPairs function
+        // RealEigenPairs<MatrixColMajor> ritzPairs = computeRitzPairs(M, max_iters, basis_size, tol);
+
+        // // Output the results
+        // std::cout << "Eigenvalues:\n" << ritzPairs.values << std::endl;
+        // std::cout << "Ritz Vectors:\n" << ritzPairs.vectors << std::endl;
+        // std::cout << "Number of Eigen Pairs: " << ritzPairs.num_pairs << std::endl;
+
+        // Check orthonormality of Q in the ArnoldiPair from arnoldiEigen
+        KrylovPair arnoldiResult = krylovIter(M, std::min(max_iters, N), tol);
+        if (checkOrthonormality(arnoldiResult.Q)) {
+            std::cout << "The columns of Q form an orthonormal set." << std::endl;
+        } else {
+            std::cout << "The columns of Q do not form an orthonormal set." << std::endl;
+        }
+
+        return EXIT_SUCCESS;
     }
 
 // ============================= EIGENSOLVER TESTS =============================
@@ -59,7 +170,6 @@ inline void testEpairs(const MatType& H, const MatType& Z, const Vector& evals, 
         if (norm_diff > 1e-5) {
             std::cout << "Norm of difference for eigenpair " << i << ": " << norm_diff << std::endl;
             correct = false;
-            break;
         }
     }
 

@@ -22,7 +22,7 @@
 using Clock = std::chrono::high_resolution_clock;
 
 template <typename MatType>
-std::tuple<ComplexVector, MatType> lapack_hessenberg_eigSolver(const MatType& H, const size_t& n) {
+std::tuple<ComplexVector, MatType> lapack_hessenberg_eigSolver(const MatType& H, ComplexVector& evals, MatType& Z) {
     constexpr bool isRowMajor = MatType::IsRowMajor;
     constexpr size_t LAPACK_MAT_TYPE = (isRowMajor) ? LAPACK_ROW_MAJOR : LAPACK_COL_MAJOR;
     constexpr char job = 'S'; // Compute Schur & Eigenvalues
@@ -30,8 +30,9 @@ std::tuple<ComplexVector, MatType> lapack_hessenberg_eigSolver(const MatType& H,
     constexpr char side = 'R'; // Right Eigenvectors
     constexpr char howmny = 'B'; // All eigenvectors
     
+    size_t n = H.cols();
     MatType H_copy = H;
-    MatType Z(n, n);
+    // MatType Z(n, n);
     Vector wr(n), wi(n);
     Vector work(3 * n);
     IntVector select(n); 
@@ -57,11 +58,31 @@ std::tuple<ComplexVector, MatType> lapack_hessenberg_eigSolver(const MatType& H,
                                     &m));
     #endif
 
-    ComplexVector evals(n);
-    for (int i = 0; i < n; i++) {evals[i] = ComplexNumber(wr[i], wi[i]);}
+    // ComplexVector evals(n);
+    for (int i = 0; i < n; i++) {evals[i] = ComplexType(wr[i], wi[i]);}
     if (isRowMajor) {Z.transposeInPlace();}
 
     return std::make_tuple(evals, Z);
+}
+
+// #ifdef EIGEN_EIGSOLVER
+template <typename MatType>
+inline void eigen_eigsolver(const MatType& A, ComplexVector& eigenvals, MatType& eigenvecs) {
+    Eigen::EigenSolver<MatType> solver(A);
+    eigenvals = solver.eigenvalues();
+    eigenvecs = solver.eigenvectors().real();
+    if constexpr (MatType::IsRowMajor) {eigenvecs.transposeInPlace();}
+}
+// #endif
+
+template <typename MatType>
+inline void eigsolver(const MatType& A, ComplexVector eigenvals, MatType eigenvecs) {
+    #ifdef EIGEN_EIGSOLVER
+    eigen_eigsolver<MatType>(A, eigenvals, eigenvecs);
+    #endif
+    #ifdef LAPACK_EIGSOLVER
+    lapack_hessenberg_eigSolver<MatType>(A, eigenvals, eigenvecs);
+    #endif
 }
 
 // LAPACK-based Schur decomposition (shseqr)
@@ -71,28 +92,15 @@ template <typename MatType>
 RealEigenPairs<MatType> eigenSolver(const MatType& A) {
     const size_t& N = A.cols();
     constexpr bool isRowMajor = MatType::IsRowMajor;
+    ComplexVector eigenvals(N);
+    MatType eigenvecs(N, N);
 
     #define LAPACK_EIGSOLVER
     //#define EIGEN_EIGSOLVER    
 
-    #ifdef EIGEN_EIGSOLVER
-    Eigen::EigenSolver<MatType> solver(A);
-    ComplexVector eigenvals = solver.eigenvalues();
-    // using ComplexMatType = std::conditional_t<isRowMajor,
-    //                                           ComplexRowMajorMatrix,
-    //                                           ComplexColMajorMatrix>;
+    eigsolver(A, eigenvals, eigenvecs);
 
-    MatType eigenvecs = solver.eigenvectors().real();
-    if (isRowMajor) {eigenvecs.transposeInPlace();}
-    #endif
-    #ifdef LAPACK_EIGSOLVER
-    ComplexVector eigenvals(N);
-    MatType eigenvecs(N, N);
-    std::tie(eigenvals, eigenvecs) = lapack_hessenberg_eigSolver(A, N);
-    #endif
     size_t num_non_zero = 0;
-    // print(eigenvals);
-    // print(eigenvecs);
 
     for (int i = 0; i < eigenvecs.cols(); ++i) {
         if (eigenvals[i].imag() != 0.0) {

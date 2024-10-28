@@ -10,9 +10,9 @@ project(CudaDemo LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CUDA_STANDARD 23)
 
-# Locate the CUDA toolkit
 find_package(CUDA REQUIRED)
 find_library(CUBLAS_LIBRARIES cublas HINTS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
+find_library(CUSOLVER_LIBRARIES cusolver HINTS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
 include_directories(${CUDA_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/include)
 link_directories(${CUDA_LIBRARY_DIRS})
 
@@ -38,7 +38,7 @@ set_target_properties(cuda_demo PROPERTIES
     CUDA_ARCHITECTURES 75  # Set the compute capability of your GPU
 )
 
-target_link_libraries(cuda_demo PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARIES} -llapack -llapacke -lblas)
+target_link_libraries(cuda_demo PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARIES} ${CUSOLVER_LIBRARIES} -llapack -llapacke -lblas)
 
 # Add a check to ensure Clang is correctly recognized for both CUDA and CXX
 message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")

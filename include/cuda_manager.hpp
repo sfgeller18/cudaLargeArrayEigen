@@ -5,9 +5,9 @@
     #include <cublas_v2.h>
     #include <cusolverDn.h>
 
-    using DeviceComplex = cuComplex;
+using DeviceComplexType = cuDoubleComplex;
 
-
+    
     enum class CuRetType {
         HOST,
         DEVICE
@@ -73,17 +73,35 @@
     using cublasGemvPtr = cublasStatus_t (*)(cublasHandle_t, cublasOperation_t, int, int,
                                                const float*, const float*, int,
                                                const float*, int, const float*, float*, int);
+    using cublasBatchedQRPtr = cublasStatus_t (*)(
+        cublasHandle_t handle, int m, int n, cuComplex* Aarray[], int lda, cuComplex* Tauarray[], int* info, int batchSize);
 #elif defined(PRECISION_DOUBLE)
     using cublasGemvPtr = cublasStatus_t (*)(cublasHandle_t, cublasOperation_t, int, int,
                                                const double*, const double*, int,
                                                const double*, int, const double*, double*, int);
+    using cublasBatchedQRPtr = cublasStatus_t (*)(
+        cublasHandle_t handle, int m, int n, cuDoubleComplex* const Aarray[], int lda, cuDoubleComplex* const Tauarray[], int* info, int batchSize);
 #elif defined(PRECISION_FLOAT16)
     using cublasGemvPtr = cublasStatus_t (*)(cublasHandle_t, cublasOperation_t, int, int,
                                                const __half*, const __half*, int,
                                                const __half*, int, const __half*, __half*, int);
+    using cublasBatchedQRPtr = void*;
 #else
     #error "No precision defined! Please define PRECISION_FLOAT, PRECISION_DOUBLE, or PRECISION_FLOAT16."
 #endif
+
+// Function to return the correct QR function pointer based on precision
+constexpr cublasBatchedQRPtr getBatchedQRFunction() {
+#if defined(PRECISION_FLOAT)
+    return cublasCgeqrfBatched;
+#elif defined(PRECISION_DOUBLE)
+    return cublasZgeqrfBatched;
+#elif defined(PRECISION_FLOAT16)
+    return nullptr;
+#else
+    return nullptr; // Should never reach here due to the preprocessor error
+#endif
+}
 
 // Function to return the correct gemv function pointer based on precision
 constexpr cublasGemvPtr getGemvFunction() {
@@ -107,6 +125,7 @@ constexpr cublasGemvPtr getGemvFunction() {
 }
 
 constexpr cublasGemvPtr cublasGemv = getGemvFunction();
+constexpr cublasBatchedQRPtr cublasBatchedComplexQR = getBatchedQRFunction();
 
 
 #endif // CUDA_MANAGER_HPP
