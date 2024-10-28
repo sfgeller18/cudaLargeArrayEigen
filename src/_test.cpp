@@ -52,7 +52,11 @@ inline int constructSMatrix(cusolverDnHandle_t solver_handle,
         CHECK_CUDA(cudaMemcpy(Q.data(), d_Q,
                              m * m * sizeof(DeviceComplexType),
                              cudaMemcpyDeviceToHost));
-        S *= Q;
+           if (batch_idx == 0) {
+                S = Q;
+            } else {
+                S = S * Q;
+            }
         
         // Free workspace for next iteration
     }
@@ -140,7 +144,6 @@ int computeShift(ComplexMatrix& S,
     constructSMatrix(solver_handle, h_Aarray, h_Tauarray, N, N, N, S, batch_count);
     
     checkOrthonormality<ComplexMatrix>(S);
-    print(S);
 
     // Clean up
     CHECK_CUDA(cudaFree(d_matrices));
@@ -156,33 +159,31 @@ int computeShift(ComplexMatrix& S,
 
 
 int reduceEvals(ComplexMatrix& H, ComplexMatrix& Q, const size_t& N, const size_t& k) {
-    // print(Q);
-    // print(H);
+    print(Q);
+    print(H);
     ComplexVector evals(N);
     ComplexMatrix evecs(N,N);
     eigsolver(H, evals, evecs);
-    ComplexMatrix S = ComplexMatrix::Identity(N,N);
+    ComplexMatrix S(N,N);
     computeShift(S, H, evals, N, k);
-    Q *= S;
+    Q = Q * S;
     H = S.adjoint() * H * S; 
 
     print(Q);
-    // print(H);
+    print(H);
     return 0;
 }
 
 int main() {
-    const size_t N = 5;
-    const size_t k = 2;
-    ComplexMatrix H = generateRandomHessenbergMatrix<ComplexMatrix>(N);
+    const size_t N = 20;
+    const size_t k = 5;
     ComplexVector evals(N);
     ComplexMatrix evecs(N,N);
+    ComplexMatrix H = generateRandomHessenbergMatrix<ComplexMatrix>(N);
+    ComplexMatrix V = gramSchmidtOrthonormal(N);
 
     eigsolver(H, evals, evecs);
-
-    ComplexMatrix Q = gramSchmidtOrthonormal(N);
-
-
-    reduceEvals(H, Q, N, k);
+    reduceEvals(H, V, N, k);
+    print(V);
 }
 
