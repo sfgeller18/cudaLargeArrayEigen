@@ -6,6 +6,46 @@
     #include <cstring>
     #include <chrono>
     #include <cmath>
+    #include <type_traits>
+
+    template <typename MatrixType>
+    inline bool isHessenberg(const MatrixType& mat, double tol = 1e-10) {
+        using Scalar = typename MatrixType::Scalar;
+        constexpr bool isComplex = std::is_same_v<Scalar, std::complex<double>> || std::is_same_v<Scalar, std::complex<float>>;
+
+        const int rows = mat.rows();
+        const int cols = mat.cols();
+
+        bool ret_val = true;
+
+        for (int i = 2; i < rows; ++i) {          // Start from the 2nd subdiagonal
+            for (int j = 0; j < i - 1 && j < cols; ++j) {
+                double value = isComplex ? std::norm(mat(i, j)) : std::abs(mat(i, j));
+                if (value > tol) {
+                    ret_val = false;
+                }
+            }
+        }
+        std::cout  << (ret_val ? "IS" : "IS NOT") << " HESSENBERG" <<std::endl;
+        return true;
+    }
+
+    template <typename MatrixType>
+    bool isOrthonormal(const MatrixType& Q, double tol = 1e-10) {
+        using Scalar = typename MatrixType::Scalar;
+        const size_t N = Q.cols();
+        MatrixType product(N, N);
+
+        if constexpr (std::is_same_v<Scalar, std::complex<double>>) {
+            product = Q.adjoint() * Q;
+        } else {
+            product = Q.transpose() * Q;
+        }
+
+        bool ret = (product - MatrixType::Identity(Q.cols(), Q.cols())).norm() < tol;
+        std::cout << (ret ? "SUCCESS" : "FAIL") << std::endl;
+        return ret;
+    }
 
     ComplexMatrix gramSchmidtOrthonormal(const size_t& n) {
             ComplexMatrix input = ComplexMatrix::Random(n,n);

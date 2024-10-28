@@ -104,23 +104,6 @@ int ArnoldiTest(int argc, char* argv[]) {
 // ============================= KRYLOV ITERATION TESTS =============================
 
 
-    template <typename MatrixType>
-    bool checkOrthonormality(const MatrixType& Q, double tol = 1e-10) {
-        using Scalar = typename MatrixType::Scalar;
-        const size_t N = Q.cols();
-        MatrixType product(N, N);
-
-        if constexpr (std::is_same_v<Scalar, std::complex<double>>) {
-            product = Q.adjoint() * Q;
-        } else {
-            product = Q.transpose() * Q;
-        }
-
-        bool ret = (product - MatrixType::Identity(Q.cols(), Q.cols())).norm() < tol;
-        std::cout << (ret ? "SUCCESS" : "FAIL") << std::endl;
-        return ret;
-    }
-
     int iterationTest(int argc, char** argv) {
         // Check for the correct number of arguments
         if (argc < 2) {
@@ -149,7 +132,7 @@ int ArnoldiTest(int argc, char* argv[]) {
 
         // Check orthonormality of Q in the ArnoldiPair from arnoldiEigen
         KrylovPair arnoldiResult = krylovIter(M, std::min(max_iters, N), tol);
-        if (checkOrthonormality(arnoldiResult.Q)) {
+        if (isOrthonormal<MatrixColMajor>(arnoldiResult.Q)) {
             std::cout << "The columns of Q form an orthonormal set." << std::endl;
         } else {
             std::cout << "The columns of Q do not form an orthonormal set." << std::endl;
