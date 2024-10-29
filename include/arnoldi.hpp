@@ -141,7 +141,7 @@ return KrylovPair(Q, H_tilde, m);
 // const size_t& basis_size: Number of ritzpairs to return
 // const HostPrecison& tol: Breakpoint for ritzvalue size
 template <typename MatrixType>
-RealEigenPairs<MatrixType> ArnoldiRitzPairs(const MatrixType& M, const size_t& max_iters, const size_t& basis_size, const HostPrecision& tol=1e-5) {
+EigenPairs<MatrixType> ArnoldiRitzPairs(const MatrixType& M, const size_t& max_iters, const size_t& basis_size, const HostPrecision& tol=1e-5) {
 
     size_t C = 0; // Number of columns in M
     size_t R = 0; // Number of rows in M

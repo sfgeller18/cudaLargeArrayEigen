@@ -143,52 +143,54 @@ int ArnoldiTest(int argc, char* argv[]) {
 
 // ============================= EIGENSOLVER TESTS =============================
 
-template <typename MatType>
-inline void testEpairs(const MatType& H, const MatType& Z, const Vector& evals, const size_t& num_pairs) {
-    constexpr bool isRowMajor = MatType::IsRowMajor;
-    bool correct = true;
-    for (int i = 0; i < num_pairs; i++) {
-        // if (evals[i].imag() != 0.0) {continue;}
-        double norm_diff = isRowMajor ? (H * Z.row(i).transpose() - evals[i] * Z.row(i).transpose()).norm() : (H * Z.col(i) - evals[i] * Z.col(i)).norm();
-        if (norm_diff > 1e-5) {
-            std::cout << "Norm of difference for eigenpair " << i << ": " << norm_diff << std::endl;
-            correct = false;
+template <typename MatrixType, typename EigenPairType>
+void testEigenpairs(const MatrixType& A, const EigenPairType& eigenPairs) {
+    for (int i = 0; i < eigenPairs.num_pairs; ++i) {
+        // Compute A * v_i
+        MatrixType Av = A * eigenPairs.vectors.col(i);
+
+        // Compute λ_i * v_i
+        MatrixType lambda_v = eigenPairs.values[i] * eigenPairs.vectors.col(i);
+
+        // Check if Av and λ_i * v_i are approximately equal
+        if ((Av - lambda_v).norm() < 1e-10) {
+            std::cout << "Eigenpair " << i + 1 << " is valid.\n";
+        } else {
+            std::cout << "Eigenpair " << i + 1 << " is NOT valid.\n";
         }
     }
-
-    if (correct) {std::cout << "All Eigenpairs Correct";}
 }
 
-    template <typename MatrixType>
-    int eigSolverTest(int argc, char* argv[]) {
-        // Check if the size argument is provided
-        if (argc < 2) {
-            std::cerr << "Usage: " << argv[0] << " <matrix_size>\n";
-            return 1;
-        }
-
-        // Convert the command line argument to size_t
-        size_t n = static_cast<size_t>(std::atoi(argv[1])); // Convert input argument to size_t
-
-        if (n <= 0) {
-            std::cerr << "Matrix size must be a positive integer.\n";
-            return 1;
-        }
-
-        // Generate a random Hessenberg matrix of size n
-        MatrixType H = generateRandomHessenbergMatrix<MatrixType>(n);
-
-        // Perform eigenvalue decomposition
-        RealEigenPairs<MatrixType> result = eigenSolver(H);
-        const Vector& evals = result.values;
-        const MatrixType& Z = result.vectors; 
-        const size_t& num_pairs = result.num_pairs;
-
-        // Test the eigenvalue pairs
-        testEpairs(H, Z, evals, num_pairs);
-
-        return 0;
+template <typename MatType>
+int eigenTest(int argc, char* argv[]) {
+    // Check if the correct number of arguments is provided
+    if (argc < 2) {
+        std::cerr << "Usage: " << argv[0] << " <size>" << std::endl;
+        return 1; // Return an error code
     }
+
+    // Convert the argument to size_t
+    size_t N = static_cast<size_t>(std::atoi(argv[1]));
+    if (N == 0) {
+        std::cerr << "Error: Size must be greater than 0." << std::endl;
+        return 1; // Return an error code
+    }
+
+    // Create an Eigen matrix (example)
+    MatType H = generateRandomHessenbergMatrix<MatType>(N); // Ensure you have this function defined
+    EigenPairs resultHolder{};
+    if (N < 10) {std::cout << H << std::endl;}
+
+    RealEigenPairs result{};
+    eigsolver<MatType>(H, resultHolder, N, matrix_type::HOUSEHOLDER);
+    if (N < 10) {std::cout << resultHolder.values << std::endl;}
+    sortEigenPairs(resultHolder);
+    if (N < 10) {std::cout << resultHolder.values << std::endl;}
+    
+    RealEigenPairs resultReal = purgeComplex(resultHolder); // Ensure you have this function defined
+    testEigenpairs<MatType, RealEigenPairs>(H, resultReal); // Pass the entire EigenPairs object
+    return 0;
+}
 
 // ============================= MATMUL TESTS =============================
 

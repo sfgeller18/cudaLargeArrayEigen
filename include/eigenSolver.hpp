@@ -1,155 +1,132 @@
 #ifndef EIGENSOLVER_HPP
 #define EIGENSOLVER_HPP
 
+    #define LAPACK_EIGSOLVER
+    //#define EIGEN_EIGSOLVER    
+    //#define CUDA_EIGSOLVER
+
 #include <iostream>
 #include <chrono>
-#include "lapack_manager.hpp"  // LAPACK
+#include <lapack.hh>   // LAPACK++ 
 #include <cusolverDn.h> // cuSolver
 #include <cuda_runtime.h>
 #include <Eigen/Dense>  // For generating matrices
 #include "vector.hpp"
 
-#define LAPACK_CHECK(func_call) \
-    { \
-        int info = func_call; \
-        if (info != 0) { \
-            std::cerr << #func_call " failed with error code: " << info << std::endl; \
-            return {}; \
-        } \
-    }
-
 // Timing helper
 using Clock = std::chrono::high_resolution_clock;
 
-template <typename MatType>
-std::tuple<ComplexVector, MatType> lapack_hessenberg_eigSolver(const MatType& H, ComplexVector& evals, MatType& Z) {
-    constexpr bool isRowMajor = MatType::IsRowMajor;
-    constexpr size_t LAPACK_MAT_TYPE = (isRowMajor) ? LAPACK_ROW_MAJOR : LAPACK_COL_MAJOR;
-    constexpr char job = 'S'; // Compute Schur & Eigenvalues
-    constexpr char compz = 'I';
-    constexpr char side = 'R'; // Right Eigenvectors
-    constexpr char howmny = 'B'; // All eigenvectors
+
+enum matrix_type : char {
+    HOUSEHOLDER = 'H',
+    HERMITIAN = 'S',
+    REGULAR = 'R'
+};
+
+RealEigenPairs purgeComplex(const EigenPairs& pair, const double& tol = 1e-10) {
+    const ComplexVector& eigenvals = pair.values;
+    const ComplexMatrix& eigenvecs = pair.vectors;
+    const size_t& N = pair.num_pairs;
     
-    size_t n = H.cols();
-    MatType H_copy = H;
-    // MatType Z(n, n);
-    Vector wr(n), wi(n);
-    Vector work(3 * n);
-    IntVector select(n); 
-    select.setOnes(); // Compute all eigenvectors
-    Vector VL(1); // Not used for right eigenvectors
-    Vector VR(n * n);
-    int ldvl = 1, ldvr = n;
-    int mm = n, m;
+    Vector real_evals(N);
+    Matrix real_evecs(N, N);
+    size_t count = 0;
+
+    for (size_t i = 0; i < N; ++i) {
+        if (std::abs(eigenvals[i].imag()) < tol) {
+            real_evals[count] = eigenvals[i].real();
+            real_evecs.col(count) = eigenvecs.col(i).real();
+            ++count;
+        }
+    }
+
+    real_evals.conservativeResize(count);
+    real_evecs.conservativeResize(N, count);
+
+    return {real_evals, real_evecs, count};
+}
+
+inline void sortEigenPairs(EigenPairs& pair) {
+    ComplexVector& evals = pair.values;
+    ComplexMatrix& evecs = pair.vectors;
+    const size_t& N = pair.num_pairs;
+    std::vector<size_t> indices(N);
+    std::iota(indices.begin(), indices.end(), 0);
+
+    // Sort indices based on eigenvalues
+    std::sort(indices.begin(), indices.end(),
+              [&evals](size_t i1, size_t i2) {
+                  return std::norm(evals[i1]) > std::norm(evals[i2]);
+              });
 
 
+    std::vector<bool> visited(N, false);
 
-    int lda = n;
+    for (size_t i = 0; i < N; ++i) {
+        if (visited[i] || indices[i] == i) {continue;}
+        size_t current = i;
+        while (!visited[current]) {
+            visited[current] = true;
+            size_t nextIndex = indices[current];
 
-    // First, compute Schur decomposition and eigenvalues
-    LAPACK_CHECK(EigenSolver(LAPACK_MAT_TYPE, job, compz, n, 1, n, H_copy.data(), lda, wr.data(), wi.data(), Z.data(), lda));
-    #ifdef PRECISION_FLOAT
-        LAPACK_CHECK(LAPACKE_strevc(LAPACK_MAT_TYPE, side, howmny, select.data(),
-                                    n, H_copy.data(), lda, nullptr, 1, Z.data(), ldvr, n,
-                                    &m));
-    #elif PRECISION_DOUBLE
-        LAPACK_CHECK(LAPACKE_dtrevc(LAPACK_MAT_TYPE, side, howmny, select.data(),
-                                    n, H_copy.data(), lda, nullptr, n, Z.data(), ldvr, n,
-                                    &m));
-    #endif
+            std::swap(evals[current], evals[nextIndex]);
+            evecs.col(current).swap(evecs.col(nextIndex));
 
-    // ComplexVector evals(n);
-    for (int i = 0; i < n; i++) {evals[i] = ComplexType(wr[i], wi[i]);}
-    if (isRowMajor) {Z.transposeInPlace();}
+            current = nextIndex;
+        }
+    }
+}
 
-    return std::make_tuple(evals, Z);
+
+template <typename MatrixType>
+int complexLapackEigenDecomp(const MatrixType& eigenMatrix, EigenPairs& resultHolder, const size_t& n) {
+    Eigen::MatrixXcd H = eigenMatrix;
+    Eigen::VectorXcd w(n);
+    Eigen::MatrixXcd Z(n, n);
+
+    //TREVC Variables
+    bool* select = new bool[n];
+    std::fill(select, select + n, true); // Select all eigenvalues
+    Eigen::MatrixXcd VL(n, n);            // Left eigenvectors (not used)
+    Eigen::MatrixXcd VR(n, n);            // Right eigenvectors
+    int64_t m = 0;
+
+    int64_t info = lapack::hseqr(lapack::JobSchur::Schur, lapack::Job::Vec, n, 1, n, H.data(), n, w.data(), Z.data(), n);
+    int64_t info_trevc = lapack::trevc(lapack::Sides::Right, lapack::HowMany::All, select, n, H.data(), n, nullptr, n, VR.data(), n, n, &m);
+    H = Z * VR;
+    // blas::gemm(1.0, Z, VR, 0.0, H); // blaspp::gemm is too complicated for my little math brain
+
+    delete[] select; // Remember to free the dynamically allocated memory
+    resultHolder = {w, H, n};
+    return 0;
 }
 
 // #ifdef EIGEN_EIGSOLVER
 template <typename MatType>
-inline void eigen_eigsolver(const MatType& A, ComplexVector& eigenvals, MatType& eigenvecs) {
+inline void pure_eigen_eigsolver(const MatType& A, EigenPairs& resultHolder) {
     Eigen::EigenSolver<MatType> solver(A);
-    eigenvals = solver.eigenvalues();
-    eigenvecs = solver.eigenvectors().real();
-    if constexpr (MatType::IsRowMajor) {eigenvecs.transposeInPlace();}
+    resultHolder.values = solver.eigenvalues();
+    resultHolder.vectors = solver.eigenvectors();
 }
-// #endif
 
+
+
+//Main interface for getting sorted eigenpairs
 template <typename MatType>
-inline void eigsolver(const MatType& A, ComplexVector eigenvals, MatType eigenvecs) {
-    #ifdef EIGEN_EIGSOLVER
-    eigen_eigsolver<MatType>(A, eigenvals, eigenvecs);
-    #endif
-    #ifdef LAPACK_EIGSOLVER
-    lapack_hessenberg_eigSolver<MatType>(A, eigenvals, eigenvecs);
-    #endif
+inline void eigsolver(const MatType& A, EigenPairs& resultHolder, const size_t& N, const matrix_type& type = matrix_type::REGULAR) {
+    if (type == matrix_type::HOUSEHOLDER) {
+        complexLapackEigenDecomp<MatType>(A, resultHolder, N);
+    } else if (type == matrix_type::HERMITIAN) {
+        // Uncomment and implement realLapackEigenDecomp for hermitian case
+        // realLapackEigenDecomp(A, resultHolder);
+    } else {
+        pure_eigen_eigsolver<MatType>(A, resultHolder);
+    }
+    sortEigenPairs(resultHolder);
 }
 
-// LAPACK-based Schur decomposition (shseqr)
-// Pass Upper Hessenberg Mat & Size
-// Pass junk copy of Matrix
-template <typename MatType> 
-RealEigenPairs<MatType> eigenSolver(const MatType& A) {
-    const size_t& N = A.cols();
-    constexpr bool isRowMajor = MatType::IsRowMajor;
-    ComplexVector eigenvals(N);
-    MatType eigenvecs(N, N);
-
-    #define LAPACK_EIGSOLVER
-    //#define EIGEN_EIGSOLVER    
-
-    eigsolver(A, eigenvals, eigenvecs);
-
-    size_t num_non_zero = 0;
-
-    for (int i = 0; i < eigenvecs.cols(); ++i) {
-        if (eigenvals[i].imag() != 0.0) {
-            eigenvals[i] = 0.0;
-            if (isRowMajor) {eigenvecs.row(i) = Vector::Zero(N);}
-            else {eigenvecs.col(i) = Vector::Zero(N);}
-        }
-        else {
-        // #define DEBUG
-        #ifdef DEBUG
-        ComplexVector evec(N);
-        if (isRowMajor) {evec = eigenvecs.row(i);}
-        else {eigenvecs.col(i);}
-        ComplexVector result = A * evec - eigenvals(i) * evec;
-        double norm = result.norm();
-        std::cout << "Norm of column " << i << ": " << norm << std::endl;
-        #endif
-        num_non_zero++;
-    }
-    }
 
 
 
-    Vector rEvals(N);
-    rEvals = eigenvals.real();
-
-    IntVector idx(N);
-    std::iota(idx.begin(), idx.end(), 0);
-    std::sort(idx.begin(), idx.end(),
-          [&rEvals](size_t i1, size_t i2) {
-              return std::norm(rEvals[i1]) > std::norm(rEvals[i2]);
-          });
-
-    Vector sorted_evals(N);
-    MatType sorted_evecs(N, N);
-    size_t count = 0;
-    for (size_t i = 0; i < N; ++i) {
-        sorted_evals[i] = rEvals[idx[i]];
-        if constexpr (MatType::IsRowMajor) {
-            sorted_evecs.row(i) = eigenvecs.row(idx[i]);
-        } else {
-            sorted_evecs.col(i) = eigenvecs.col(idx[i]);
-
-        }
-    }
-
-    std::cout << num_non_zero << std::endl;
-    if (isRowMajor) {return {sorted_evals.head(num_non_zero), sorted_evecs.block(0, 0, num_non_zero, N), num_non_zero};}
-    else {return {sorted_evals.head(num_non_zero), sorted_evecs.block(0, 0, N, num_non_zero), num_non_zero};}
-}
 
 #endif // EIGENSOLVER_HPP

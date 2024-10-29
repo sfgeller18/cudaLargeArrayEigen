@@ -16,12 +16,19 @@ find_library(CUSOLVER_LIBRARIES cusolver HINTS ${CUDA_TOOLKIT_ROOT_DIR}/lib64)
 include_directories(${CUDA_INCLUDE_DIRS} ${PROJECT_SOURCE_DIR}/include)
 link_directories(${CUDA_LIBRARY_DIRS})
 
+# Find LAPACK and BLAS
 find_package(LAPACK REQUIRED)
-find_library((LAPACKE_LIB lapacke REQUIRED))
+find_library(LAPACKE_LIB NAMES lapacke REQUIRED)
+
+# # Find LAPACK++ and BLAS++
+# set(LAPACKPP_DIR "/opt/slate/include")
+# set(BLASPP_DIR "/opt/slate/include/blas")
+
+include_directories("/opt/slate/include")  # Add include directories for LAPACK++ and BLAS++
+link_directories("/opt/slate/lib")  # Add link directory for LAPACK++ and BLAS++
 
 # Clang/CUDA warnings
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -diag-suppress 20012")
-
 
 # Add source files from the src directory
 file(GLOB SOURCES "src/*.cu" "src/*.cpp")
@@ -38,12 +45,12 @@ set_target_properties(cuda_demo PROPERTIES
     CUDA_ARCHITECTURES 75  # Set the compute capability of your GPU
 )
 
-target_link_libraries(cuda_demo PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARIES} ${CUSOLVER_LIBRARIES} -llapack -llapacke -lblas)
+# Link against LAPACK++, BLAS++, and other libraries
+target_link_libraries(cuda_demo PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARIES} ${CUSOLVER_LIBRARIES} -llapack -llapacke -lblas -llapackpp -lblaspp)
 
 # Add a check to ensure Clang is correctly recognized for both CUDA and CXX
 message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
 message(STATUS "CUDA compiler: ${CMAKE_CUDA_COMPILER}")
-
 
 # Find Eigen (assuming it's installed in a standard location)
 find_package(Eigen3 REQUIRED)

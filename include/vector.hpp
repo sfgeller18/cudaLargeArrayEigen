@@ -167,13 +167,7 @@ void print(const MatrixType& mat, size_t n = std::numeric_limits<size_t>::max())
 
 #endif
 
-// Eigen/Ritz Pair Struct
-template <typename MatrixType>
-struct RealEigenPairs {
-    Vector values;
-    MatrixType vectors;
-    size_t num_pairs;
-};
+
 
 using Shape = std::pair<size_t, size_t>;
 Shape shape(const Matrix& M) {
@@ -213,6 +207,19 @@ Vector randVecGen(size_t N) {
     }
     return v0;
 }
+
+struct EigenPairs {
+    ComplexVector values;
+    ComplexMatrix vectors;
+    size_t num_pairs;
+};
+
+struct RealEigenPairs {
+    Vector values;
+    Matrix vectors;
+    size_t num_pairs;
+};
+
     
 
 #endif // VECTOR_HPP
