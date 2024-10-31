@@ -102,7 +102,7 @@ RealKrylovPair RealKrylovIter(const MatrixType& M, const size_t& max_iters, cubl
     const size_t NUM_EVECS_ON_DEVICE = num_iters + 1; 
     const size_t ROWS = DYNAMIC_ROW_ALLOC(N);
 
-    // Allocations
+    // CUDA Allocations
     DevicePrecision* d_evecs = cudaMallocChecked<DevicePrecision>(NUM_EVECS_ON_DEVICE * N * PRECISION_SIZE);
     DevicePrecision* d_proj = cudaMallocChecked<DevicePrecision>(NUM_EVECS_ON_DEVICE * PRECISION_SIZE);
     DevicePrecision* d_y = cudaMallocChecked<DevicePrecision>(N * PRECISION_SIZE);

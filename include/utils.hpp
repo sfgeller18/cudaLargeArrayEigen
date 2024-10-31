@@ -36,7 +36,7 @@
                 }
             }
         }
-        std::cout  << (ret_val ? "IS" : "IS NOT") << " HESSENBERG" <<std::endl;
+        // std::cout  << (ret_val ? "IS" : "IS NOT") << " HESSENBERG" <<std::endl;
         return true;
     }
 

@@ -33,6 +33,17 @@ using DeviceComplexType = cuDoubleComplex;
         }
     }
 
+    inline void cudaFreeChecked(void* d_ptr) {
+        if (d_ptr != nullptr) { // Check if the pointer is not null
+            cudaError_t error = cudaFree(d_ptr);
+            if (error != cudaSuccess) {
+                throw CudaError("cudaFree failed: " + std::string(cudaGetErrorString(error)));
+            }
+        } else {
+            throw std::invalid_argument("Pointer passed to cudaFreeChecked is null.");
+        }
+    }
+
     constexpr size_t MEM_BUFFER = 500 * (1024*1024); // 500MB Memory Buffer for any given device
     constexpr size_t MAX_ROW_ALLOC(const size_t& num_bytes, const size_t& row_length) {
         return static_cast<size_t>((num_bytes - MEM_BUFFER) / (PRECISION_SIZE * row_length));

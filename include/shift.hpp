@@ -27,8 +27,8 @@
                             cublasHandle_t blas_handle,
                             const std::vector<DeviceComplexType*>& h_Aarray, 
                             const std::vector<DeviceComplexType*>& h_Tauarray,
-                            const int m,
-                            const int n,
+                            const int m, //Basis Size
+                            const int n, //Q column length (Original Space Size)
                             const int lda,
                             ComplexMatrix& S,
                             const int batch_count) {
@@ -54,8 +54,9 @@
         CHECK_CUDA(cudaMalloc(&d_work, lwork * sizeof(DeviceComplexType)));
 
         // Constants for cublas
-        const DeviceComplexType alpha = make_cuDoubleComplex(1.0, 0.0);
-        const DeviceComplexType beta = make_cuDoubleComplex(0.0, 0.0);
+        const DeviceComplexType one = make_cuDoubleComplex(1.0, 0.0);
+        const DeviceComplexType zero = make_cuDoubleComplex(0.0, 0.0);
+
         ComplexMatrix Q(m,n);
         for (int batch_idx = 0; batch_idx < batch_count; batch_idx++) {
             // Copy the QR factored matrix to d_Q
@@ -71,46 +72,18 @@
                 d_work, lwork,
                 d_info));
 
-        //         // Copy result back to host
-        //         CHECK_CUDA(cudaMemcpy(Q.data(), d_Q,
-        //                          m * m * sizeof(DeviceComplexType),
-        //                          cudaMemcpyDeviceToHost));
-        //        if (batch_idx == 0) {
-        //             S = Q;
-        //         } else {
-        //             S = S * Q;
-        //         }
-            
-        //     // Free workspace for next iteration
-        // }
-
-            if (batch_idx == 0) {
                 // For first iteration, just copy Q to S
-                CHECK_CUDA(cudaMemcpy(d_S, d_Q, 
-                                    m * m * sizeof(DeviceComplexType),
-                                    cudaMemcpyDeviceToDevice));
-            } else {
-                // S = S * Q
-                // First copy current S to temp
-                CHECK_CUDA(cudaMemcpy(d_temp, d_S,
-                                    m * m * sizeof(DeviceComplexType),
-                                    cudaMemcpyDeviceToDevice));
-                
-                // Perform matrix multiplication: d_S = d_temp * d_Q
-                CHECK_CUBLAS(cublasZgemm(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N,
-                                    m, m, m,
-                                    &alpha,
-                                    d_temp, m,
-                                    d_Q, m,
-                                    &beta,
-                                    d_S, m));
-            }
+            if (batch_idx == 0) {
+                CHECK_CUDA(cudaMemcpy(d_S, d_Q, m * m * sizeof(DeviceComplexType), cudaMemcpyDeviceToDevice));
+            } else {CHECK_CUBLAS(cublasZgemm(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N, m, m, m, &one, d_S, m, d_Q, m, &zero, d_S, m));}
         }
 
         // Copy final result back to host
         CHECK_CUDA(cudaMemcpy(S.data(), d_S,
                             m * m * sizeof(DeviceComplexType),
                             cudaMemcpyDeviceToHost));
+
+        print(S);
         
         // Clean up
         CHECK_CUDA(cudaFree(d_Q));
@@ -122,45 +95,39 @@
         return 0;
     }
 
-    int computeShift(ComplexMatrix& S,
+    inline int computeShift(ComplexMatrix& S,
                     const ComplexMatrix& complex_M, 
                     const ComplexVector& eigenvalues,
                     const size_t& N,
                     const size_t& m,
                     cublasHandle_t& handle,
                     cusolverDnHandle_t& solver_handle) {
+
         assert(m < N);
-        isHessenberg(complex_M);
+        assert(isHessenberg(complex_M));
+
         const size_t N_squared = N * N;
         const size_t batch_count = N - m;
-        std::cout << N_squared << ", " << batch_count << std::endl;
+        int info;
 
-        // Allocate device memory for matrices and tau
-        DeviceComplexType* d_matrices;
-        DeviceComplexType* d_tau;
-
-        CHECK_CUDA(cudaMalloc(&d_matrices, batch_count * N_squared * sizeof(DeviceComplexType)));
-        CHECK_CUDA(cudaMalloc(&d_tau, batch_count * N * sizeof(DeviceComplexType)));
-        std::cout << "HEY" << std::endl;
-
-        // Allocate array of pointers
-        DeviceComplexType** d_Aarray;
-        DeviceComplexType** d_Tauarray;
-        CHECK_CUDA(cudaMalloc(&d_Aarray, batch_count * sizeof(DeviceComplexType*)));
-        CHECK_CUDA(cudaMalloc(&d_Tauarray, batch_count * sizeof(DeviceComplexType*)));
-        std::cout << "HEY" << std::endl;
-
+        DeviceComplexType* d_matrices = cudaMallocChecked<DeviceComplexType>(batch_count * N_squared * sizeof(DeviceComplexType));
+        DeviceComplexType* d_tau = cudaMallocChecked<DeviceComplexType>(batch_count * N * sizeof(DeviceComplexType));
+        DeviceComplexType** d_Aarray = cudaMallocChecked<DeviceComplexType*>(batch_count * sizeof(DeviceComplexType*));
+        DeviceComplexType** d_Tauarray = cudaMallocChecked<DeviceComplexType*>(batch_count * sizeof(DeviceComplexType*));
         std::vector<size_t> indices(batch_count);
+
+        //Host Array of Device Ptrs for cublas
+        std::vector<DeviceComplexType*> h_Aarray(batch_count);
+        std::vector<DeviceComplexType*> h_Tauarray(batch_count);
+
         std::iota(indices.begin(), indices.end(), 0);
         std::sort(indices.begin(), indices.end(),
                 [&eigenvalues](size_t i1, size_t i2) { return std::norm(eigenvalues[i1]) < std::norm(eigenvalues[i2]); });
-        std::cout << "HEY" << std::endl;
 
         ComplexVector smallest_eigenvalues(batch_count);
         for (size_t i = 0; i < batch_count; ++i) {
             smallest_eigenvalues[i] = eigenvalues[indices[i]];
         }
-        std::cout << "HEY" << std::endl;
 
         // Prepare matrices on host
         std::vector<DeviceComplexType> h_matrices(batch_count * N_squared);
@@ -176,69 +143,34 @@
                 }
             }
         }
-        std::cout << "HEY" << std::endl;
 
         // Copy matrices to device
         CHECK_CUDA(cudaMemcpy(d_matrices, h_matrices.data(), 
                             batch_count * N_squared * sizeof(DeviceComplexType), 
                             cudaMemcpyHostToDevice));
-        std::cout << "HEY" << std::endl;
 
-        // Set up arrays of pointers
-        std::vector<DeviceComplexType*> h_Aarray(batch_count);
-        std::vector<DeviceComplexType*> h_Tauarray(batch_count);
+        // Set up host arrays of device pointers for cublas
         for (int i = 0; i < batch_count; i++) {
             h_Aarray[i] = d_matrices + i * N_squared;
             h_Tauarray[i] = d_tau + i * N;
         }
-        std::cout << "HEY" << std::endl;
 
         // Copy pointer arrays to device
-        CHECK_CUDA(cudaMemcpy(d_Aarray, h_Aarray.data(), batch_count * sizeof(DeviceComplexType*), cudaMemcpyHostToDevice));
-        CHECK_CUDA(cudaMemcpy(d_Tauarray, h_Tauarray.data(), batch_count * sizeof(DeviceComplexType*), cudaMemcpyHostToDevice));
-        std::cout << "HEY" << std::endl;
+        cudaMemcpyChecked(d_Aarray, h_Aarray.data(), batch_count * sizeof(DeviceComplexType*), cudaMemcpyHostToDevice);
+        cudaMemcpyChecked(d_Tauarray, h_Tauarray.data(), batch_count * sizeof(DeviceComplexType*), cudaMemcpyHostToDevice);
 
-        // Perform batched QR factorization
-        int info;
         CHECK_CUBLAS(cublasZgeqrfBatched(handle, N, N, d_Aarray, N, d_Tauarray, &info, batch_count));
-        std::cout << "HEY" << std::endl;
 
         // Pass the device array pointer and host tau array
         constructSMatrix(solver_handle, handle, h_Aarray, h_Tauarray, N, N, N, S, batch_count);
-        std::cout << "HEY" << std::endl;
         
-        isOrthonormal<ComplexMatrix>(S);
-        ComplexMatrix prod = S.adjoint() * complex_M * S;
-        std::cout << "HEY" << std::endl;
+        assert(isOrthonormal<ComplexMatrix>(S));
 
-        // Clean up
-        CHECK_CUDA(cudaFree(d_matrices));
-        CHECK_CUDA(cudaFree(d_tau));
-        CHECK_CUDA(cudaFree(d_Aarray));
-        CHECK_CUDA(cudaFree(d_Tauarray));
-        std::cout << "HEY" << std::endl;
+        cudaFreeChecked(d_matrices);
+        cudaFreeChecked(d_tau);
+        cudaFreeChecked(d_Aarray);
+        cudaFreeChecked(d_Tauarray);
 
-        return 0;
-    }
-
-    //Modifies Krylov Pair in place
-    int reduceEvals(ComplexKrylovPair& pair, const size_t& N, const size_t& k, cublasHandle_t& handle, cusolverDnHandle_t solver_handle) {
-        ComplexMatrix& H = pair.H;
-        ComplexMatrix& Q = pair.Q;
-        EigenPairs eigpairs{};
-        eigsolver<ComplexMatrix>(H, eigpairs, N, matrix_type::HESSENBERG);
-        ComplexMatrix S(N,N);
-        std::cout << k << std::endl;
-
-        // Create cublas handle and perform QR factorization
-
-        computeShift(S, H, eigpairs.values, N, k, handle, solver_handle);
-        H = S * H * S.adjoint();
-        isOrthonormal<ComplexMatrix>(S);
-
-    
-        // print(Q);
-        // print(H);
         return 0;
     }
 
