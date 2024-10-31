@@ -38,6 +38,13 @@ using DeviceComplexType = cuDoubleComplex;
         return static_cast<size_t>((num_bytes - MEM_BUFFER) / (PRECISION_SIZE * row_length));
     }
 
+    inline size_t DYNAMIC_ROW_ALLOC(const size_t& N) {
+        size_t free_mem = 0;
+        size_t total_mem = 0;
+        cudaError_t error = cudaMemGetInfo(&free_mem, &total_mem);
+        return MAX_ROW_ALLOC(free_mem, N);
+    }
+
 
 // Error checking macro
 #define CHECK_CUDA(func)                                                       \
@@ -75,20 +82,52 @@ using DeviceComplexType = cuDoubleComplex;
                                                const float*, int, const float*, float*, int);
     using cublasBatchedQRPtr = cublasStatus_t (*)(
         cublasHandle_t handle, int m, int n, cuComplex* Aarray[], int lda, cuComplex* Tauarray[], int* info, int batchSize);
+    using cublasNormPtr = cublasStatus_t (*)(cublasHandle_t, int, const float*, int, float*);
+    using cublasScalePtr = cublasStatus_t (*)(cublasHandle_t, int, const float*, float*, int);
 #elif defined(PRECISION_DOUBLE)
     using cublasGemvPtr = cublasStatus_t (*)(cublasHandle_t, cublasOperation_t, int, int,
                                                const double*, const double*, int,
                                                const double*, int, const double*, double*, int);
     using cublasBatchedQRPtr = cublasStatus_t (*)(
         cublasHandle_t handle, int m, int n, cuDoubleComplex* const Aarray[], int lda, cuDoubleComplex* const Tauarray[], int* info, int batchSize);
+    using cublasNormPtr = cublasStatus_t (*)(cublasHandle_t, int, const double*, int, double*);
+    using cublasScalePtr = cublasStatus_t (*)(cublasHandle_t, int, const double*, double*, int);
 #elif defined(PRECISION_FLOAT16)
     using cublasGemvPtr = cublasStatus_t (*)(cublasHandle_t, cublasOperation_t, int, int,
                                                const __half*, const __half*, int,
                                                const __half*, int, const __half*, __half*, int);
-    using cublasBatchedQRPtr = void*;
+    using cublasBatchedQRPtr = void*; // No specific function for float16
+    using cublasNormPtr = void*; // No specific function for float16
+    using cublasScalePtr = void*; // No specific function for float16
 #else
     #error "No precision defined! Please define PRECISION_FLOAT, PRECISION_DOUBLE, or PRECISION_FLOAT16."
 #endif
+
+// Function to return the correct normalization function pointer based on precision
+constexpr cublasNormPtr getNormFunction() {
+#if defined(PRECISION_FLOAT)
+    return cublasSnrm2;
+#elif defined(PRECISION_DOUBLE)
+    return cublasDnrm2;
+#elif defined(PRECISION_FLOAT16)
+    return nullptr; // No normalization function for float16
+#else
+    return nullptr; // Should never reach here due to the preprocessor error
+#endif
+}
+
+// Function to return the correct scaling function pointer based on precision
+constexpr cublasScalePtr getScaleFunction() {
+#if defined(PRECISION_FLOAT)
+    return cublasSscal;
+#elif defined(PRECISION_DOUBLE)
+    return cublasDscal;
+#elif defined(PRECISION_FLOAT16)
+    return nullptr; // No scaling function for float16
+#else
+    return nullptr; // Should never reach here due to the preprocessor error
+#endif
+}
 
 // Function to return the correct QR function pointer based on precision
 constexpr cublasBatchedQRPtr getBatchedQRFunction() {
@@ -126,6 +165,8 @@ constexpr cublasGemvPtr getGemvFunction() {
 
 constexpr cublasGemvPtr cublasGemv = getGemvFunction();
 constexpr cublasBatchedQRPtr cublasBatchedComplexQR = getBatchedQRFunction();
+constexpr cublasNormPtr cublasNorm = getNormFunction();
+constexpr cublasScalePtr cublasScale = getScaleFunction();
 
 
 #endif // CUDA_MANAGER_HPP

@@ -5,21 +5,18 @@
     //#define EIGEN_EIGSOLVER    
     //#define CUDA_EIGSOLVER
 
-#include <iostream>
-#include <chrono>
 #include <lapack.hh>   // LAPACK++ 
-#include <cusolverDn.h> // cuSolver
-#include <cuda_runtime.h>
-#include <Eigen/Dense>  // For generating matrices
 #include "vector.hpp"
+#include <complex>
+#include <numeric>
+#include <memory>
+#include "utils.hpp"
 
-// Timing helper
-using Clock = std::chrono::high_resolution_clock;
 
 
 enum matrix_type : char {
-    HOUSEHOLDER = 'H',
-    HERMITIAN = 'S',
+    HESSENBERG = 'H',
+    SELFADJOINT = 'S',
     REGULAR = 'R'
 };
 
@@ -79,48 +76,99 @@ inline void sortEigenPairs(EigenPairs& pair) {
 
 
 template <typename MatrixType>
-int complexLapackEigenDecomp(const MatrixType& eigenMatrix, EigenPairs& resultHolder, const size_t& n) {
+inline int HessenbergLapackEigenDecomp(const MatrixType& eigenMatrix, EigenPairs& resultHolder, const size_t& n) {
     Eigen::MatrixXcd H = eigenMatrix;
     Eigen::VectorXcd w(n);
     Eigen::MatrixXcd Z(n, n);
 
-    //TREVC Variables
-    bool* select = new bool[n];
-    std::fill(select, select + n, true); // Select all eigenvalues
-    Eigen::MatrixXcd VL(n, n);            // Left eigenvectors (not used)
-    Eigen::MatrixXcd VR(n, n);            // Right eigenvectors
+    // TREVC Variables
+    bool select[n]; // Use a plain array
+    std::fill(select, select + n, true);
+
+    Eigen::MatrixXcd VR(n, n);
     int64_t m = 0;
 
-    int64_t info = lapack::hseqr(lapack::JobSchur::Schur, lapack::Job::Vec, n, 1, n, H.data(), n, w.data(), Z.data(), n);
-    int64_t info_trevc = lapack::trevc(lapack::Sides::Right, lapack::HowMany::All, select, n, H.data(), n, nullptr, n, VR.data(), n, n, &m);
-    H = Z * VR;
-    // blas::gemm(1.0, Z, VR, 0.0, H); // blaspp::gemm is too complicated for my little math brain
+    // Call LAPACK functions
+    LAPACKPP_CHECK(lapack::hseqr(lapack::JobSchur::Schur, lapack::Job::Vec, n, 1, n, H.data(), n, w.data(), Z.data(), n));
+    LAPACKPP_CHECK(lapack::trevc3(lapack::Sides::Right, lapack::HowMany::All, select, n, H.data(), n, nullptr, n, VR.data(), n, n, &m));
 
-    delete[] select; // Remember to free the dynamically allocated memory
-    resultHolder = {w, H, n};
-    return 0;
+    ComplexMatrix evecs = Z * VR; // Ensure ComplexMatrix is defined correctly
+
+    resultHolder = {w, evecs, false, false, n};
+
+    return 0; // Return success
 }
 
 // #ifdef EIGEN_EIGSOLVER
 template <typename MatType>
-inline void pure_eigen_eigsolver(const MatType& A, EigenPairs& resultHolder) {
-    Eigen::EigenSolver<MatType> solver(A);
-    resultHolder.values = solver.eigenvalues();
-    resultHolder.vectors = solver.eigenvectors();
+inline int complex_eigen_eigsolver(const MatType& A, EigenPairs& resultHolder, const size_t& N) {
+using EigenSolver = std::conditional_t<std::is_same_v<typename MatType::Scalar, ComplexType>, 
+                                        Eigen::ComplexEigenSolver<MatType>, 
+                                        Eigen::EigenSolver<MatType>>;
+    EigenSolver solver(A);
+    resultHolder = {solver.eigenvalues(), solver.eigenvectors(),false, false, N};
+    return 0;
+}
+
+template <typename MatType>
+inline int RealSymmetricEigenDecomp(const MatType& A, RealEigenPairs& resultHolder, const size_t& N) {
+    static_assert(std::is_same<typename MatType::Scalar, ComplexType>::value == false, 
+                  "Only use RealSymmetricEigenDecomp for Real MatrixType");
+    constexpr bool isRowMajor = MatType::IsRowMajor;
+    MatType H = A;
+    Vector w(N);
+    LAPACKPP_CHECK(lapack::syev(lapack::Job::Vec, lapack::Uplo::Upper, N, H.data(), N, w.data()));
+    resultHolder = {w, H, N};
+    return 0;
+}
+
+template <typename MatType>
+inline int HermitianEigenDecomp(const MatType& A, MixedEigenPairs& resultHolder, const size_t& N) {
+    static_assert(std::is_same<typename MatType::Scalar, ComplexType>::value == true, 
+                  "Only use HermitianEigenDecomp for Complex MatrixType");
+    constexpr bool isRowMajor = MatType::IsRowMajor;
+    MatType H = A;
+    Vector w(N);
+    LAPACKPP_CHECK(lapack::heev(lapack::Job::Vec, lapack::Uplo::Upper, N, H.data(), N, w.data()));
+    resultHolder = {w, H, N};
+    return 0;
 }
 
 
 
-//Main interface for getting sorted eigenpairs
+
+
+
+#include <iostream>
+
+
+
 template <typename MatType>
-inline void eigsolver(const MatType& A, EigenPairs& resultHolder, const size_t& N, const matrix_type& type = matrix_type::REGULAR) {
-    if (type == matrix_type::HOUSEHOLDER) {
-        complexLapackEigenDecomp<MatType>(A, resultHolder, N);
-    } else if (type == matrix_type::HERMITIAN) {
-        // Uncomment and implement realLapackEigenDecomp for hermitian case
-        // realLapackEigenDecomp(A, resultHolder);
+inline void eigsolver(const MatType& A, EigenPairs& resultHolder, const size_t& N, 
+                      const matrix_type type = matrix_type::REGULAR) {
+    if (type == matrix_type::HESSENBERG) {
+        HessenbergLapackEigenDecomp<MatType>(A, resultHolder, N);
+    } else if (type == matrix_type::SELFADJOINT) {
+        if constexpr (std::is_same_v<typename MatType::Scalar, ComplexType>) {
+            MixedEigenPairs tempHolder{};
+            HermitianEigenDecomp<MatType>(A, tempHolder, N);
+            resultHolder.values = tempHolder.values;
+            resultHolder.vectors = tempHolder.vectors;
+            resultHolder.realEvals = true;
+            resultHolder.realEvecs = true;
+            resultHolder.num_pairs = N;
+
+        } else {
+            RealEigenPairs tempHolder{};
+           RealSymmetricEigenDecomp<MatType>(A, tempHolder, N);
+            resultHolder.values = tempHolder.values;
+            resultHolder.vectors = tempHolder.vectors;
+            resultHolder.realEvals = true;
+            resultHolder.realEvecs = false;
+            resultHolder.num_pairs = N;
+        }
     } else {
-        pure_eigen_eigsolver<MatType>(A, resultHolder);
+        complex_eigen_eigsolver<MatType>(A, resultHolder, N);
     }
     sortEigenPairs(resultHolder);
 }

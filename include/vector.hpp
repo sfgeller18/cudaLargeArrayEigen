@@ -44,7 +44,7 @@ constexpr size_t PRECISION_SIZE = sizeof(HostPrecision);
 
     // Dynamic matrices
     using Matrix = Eigen::Matrix<HostPrecision, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Default column-major matrix
-    using ComplexMatrix = Eigen::Matrix<std::complex<HostPrecision>, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Complex matrix
+    using ComplexMatrix = Eigen::Matrix<ComplexType, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Complex matrix
     using MatrixRowMajor = Eigen::Matrix<HostPrecision, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>; // Row-major matrix
     using MatrixColMajor = Eigen::Matrix<HostPrecision, Eigen::Dynamic, Eigen::Dynamic, Eigen::ColMajor>; // Column-major matrix
     using ComplexRowMajorMatrix = Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
@@ -211,12 +211,20 @@ Vector randVecGen(size_t N) {
 struct EigenPairs {
     ComplexVector values;
     ComplexMatrix vectors;
+    bool realEvals = false;
+    bool realEvecs = false;
     size_t num_pairs;
 };
 
 struct RealEigenPairs {
     Vector values;
     Matrix vectors;
+    size_t num_pairs;
+};
+
+struct MixedEigenPairs {
+    Vector values;
+    ComplexMatrix vectors;
     size_t num_pairs;
 };
 

@@ -7,22 +7,19 @@
     #include "matmul.hpp"
     #include "shift.hpp"
 
-
     #include "utils.hpp"
 
     
 // ============================= SHIFTING TESTS =============================
 
-
 // int shiftTests() {
 //     const size_t& N = 10;
 //     Matrix M = generateRandomHessenbergMatrix<Matrix>(N);
+//     EigenPairs eigpairs{};
 //     ComplexMatrix complex_M = M;
-//     ComplexVector eigenvalues(N);
-//     Matrix eigenvecs(N, N);
-//     eigen_eigsolver(M, eigenvalues, eigenvecs);
+//     eigsolver<Matrix>(M, eigpairs, N, matrix_type::HESSENBERG);
 //     ComplexMatrix S = ComplexMatrix::Identity(N,N);
-//     computeShift(S, complex_M, eigenvalues, N, int(N/2));
+//     computeShift(S, complex_M, eigpairs.values, N, int(N/2));
 //     print(S);
 //     return 0;
 // }
@@ -33,20 +30,20 @@ template <typename MatrixType>
 void testRitzPairs(const MatrixType& M, size_t max_iters, size_t basis_size, HostPrecision tol = 1e-5) {
     // Compute Ritz pairs
     constexpr bool isRowMajor = MatrixType::IsRowMajor;
-    RealEigenPairs<MatrixType> ritzPairs = computeRitzPairs<MatrixType>(M, max_iters, basis_size, tol);
-    const Vector& ritzValues = ritzPairs.values;      // Ritz eigenvalues
-    const MatrixType& ritzVectors = ritzPairs.vectors; // Ritz eigenvectors
+    EigenPairs ritzPairs = NaiveArnoldi<MatrixType>(M, max_iters, basis_size, tol);
+    const ComplexVector& ritzValues = ritzPairs.values;      // Ritz eigenvalues
+    const ComplexMatrix& ritzVectors = ritzPairs.vectors; // Ritz eigenvectors
 
     // Calculate matrix norm once
     HostPrecision matrix_norm = M.norm();
     
     // Verify each Ritz pair
     for (size_t i = 0; i < ritzValues.size(); ++i) {
-        const HostPrecision& eigenvalue = ritzValues[i];
-        Matrix H_shifted = M - eigenvalue * Matrix::Identity(ritzVectors.rows(), ritzVectors.rows());
+        const ComplexType& eigenvalue = ritzValues[i];
+        ComplexMatrix H_shifted = M - eigenvalue * Matrix::Identity(ritzVectors.rows(), ritzVectors.rows());
         
         // Get current eigenvector
-        Vector current_vector;
+        ComplexVector current_vector;
         if (isRowMajor) {
             current_vector = ritzVectors.row(i).transpose();
         } else {
@@ -54,7 +51,7 @@ void testRitzPairs(const MatrixType& M, size_t max_iters, size_t basis_size, Hos
         }
         
         // Calculate residual and its norm
-        Vector residual = H_shifted * current_vector;
+        ComplexVector residual = H_shifted * current_vector;
         HostPrecision residual_norm = residual.norm();
         HostPrecision vector_norm = current_vector.norm();
         
@@ -77,8 +74,10 @@ void testRitzPairs(const MatrixType& M, size_t max_iters, size_t basis_size, Hos
 template <size_t MAX_ITERS>
 int ArnoldiTest(int argc, char* argv[]) {
     size_t matrixSize = (argc > 1) ? std::stoi(argv[1]) : 100; // Use the input size, or default to 100
-    size_t max_iters = (matrixSize < 10 * MAX_ITERS) ? matrixSize / 10 : MAX_ITERS;
-    size_t basis_size = 10;
+    size_t max_iters = (argc > 2) ? std::stoi(argv[2]) : 50;
+    size_t basis_size = (argc > 3) ? std::stoi(argv[3]) : 10;;
+
+    std::cout << max_iters << ", " << basis_size;
 
     // Create a test matrix M of size matrixSize
     MatrixColMajor M = MatrixColMajor::Random(matrixSize, matrixSize);
@@ -87,7 +86,7 @@ int ArnoldiTest(int argc, char* argv[]) {
     auto start = std::chrono::high_resolution_clock::now();
 
     // Run the test function
-    testRitzPairs(M, max_iters, basis_size);
+    testRitzPairs<MatrixColMajor>(M, max_iters, basis_size);
 
     // End timing
     auto end = std::chrono::high_resolution_clock::now();
@@ -131,13 +130,17 @@ int ArnoldiTest(int argc, char* argv[]) {
         // std::cout << "Number of Eigen Pairs: " << ritzPairs.num_pairs << std::endl;
 
         // Check orthonormality of Q in the ArnoldiPair from arnoldiEigen
-        KrylovPair arnoldiResult = krylovIter(M, std::min(max_iters, N), tol);
+        cublasHandle_t handle;
+        CHECK_CUBLAS(cublasCreate(&handle));
+        
+        RealKrylovPair arnoldiResult = RealKrylovIter(M, std::min(max_iters, N), handle);
         if (isOrthonormal<MatrixColMajor>(arnoldiResult.Q)) {
             std::cout << "The columns of Q form an orthonormal set." << std::endl;
         } else {
             std::cout << "The columns of Q do not form an orthonormal set." << std::endl;
         }
-
+    
+        CHECK_CUBLAS(cublasDestroy(handle));
         return EXIT_SUCCESS;
     }
 
@@ -145,14 +148,17 @@ int ArnoldiTest(int argc, char* argv[]) {
 
 template <typename MatrixType, typename EigenPairType>
 void testEigenpairs(const MatrixType& A, const EigenPairType& eigenPairs) {
+    using ScalarType = typename MatrixType::Scalar;
+    using SecondMatrixType = std::conditional_t<
+        std::is_same<ScalarType, ComplexType>::value || 
+        std::is_same<EigenPairType, EigenPairs>::value, 
+        ComplexMatrix, 
+        MatrixType>;
+
     for (int i = 0; i < eigenPairs.num_pairs; ++i) {
-        // Compute A * v_i
-        MatrixType Av = A * eigenPairs.vectors.col(i);
+        SecondMatrixType Av = A * eigenPairs.vectors.col(i);
+        SecondMatrixType lambda_v = eigenPairs.values[i] * eigenPairs.vectors.col(i);
 
-        // Compute λ_i * v_i
-        MatrixType lambda_v = eigenPairs.values[i] * eigenPairs.vectors.col(i);
-
-        // Check if Av and λ_i * v_i are approximately equal
         if ((Av - lambda_v).norm() < 1e-10) {
             std::cout << "Eigenpair " << i + 1 << " is valid.\n";
         } else {
@@ -160,6 +166,7 @@ void testEigenpairs(const MatrixType& A, const EigenPairType& eigenPairs) {
         }
     }
 }
+
 
 template <typename MatType>
 int eigenTest(int argc, char* argv[]) {
@@ -177,18 +184,18 @@ int eigenTest(int argc, char* argv[]) {
     }
 
     // Create an Eigen matrix (example)
-    MatType H = generateRandomHessenbergMatrix<MatType>(N); // Ensure you have this function defined
+    MatType H = generateRandomHessenbergMatrix<MatType>(N);
     EigenPairs resultHolder{};
     if (N < 10) {std::cout << H << std::endl;}
 
-    RealEigenPairs result{};
-    eigsolver<MatType>(H, resultHolder, N, matrix_type::HOUSEHOLDER);
+    eigsolver<MatType, EigenPairs>(H, resultHolder, N, matrix_type::HESSENBERG);
     if (N < 10) {std::cout << resultHolder.values << std::endl;}
     sortEigenPairs(resultHolder);
+    testEigenpairs<MatType, EigenPairs>(H, resultHolder);
     if (N < 10) {std::cout << resultHolder.values << std::endl;}
     
-    RealEigenPairs resultReal = purgeComplex(resultHolder); // Ensure you have this function defined
-    testEigenpairs<MatType, RealEigenPairs>(H, resultReal); // Pass the entire EigenPairs object
+    RealEigenPairs resultReal = purgeComplex(resultHolder); 
+    testEigenpairs<MatType, RealEigenPairs>(H, resultReal);
     return 0;
 }
 

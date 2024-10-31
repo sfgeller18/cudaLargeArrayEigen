@@ -1,97 +1,35 @@
 #include <iostream>
-#include <Eigen/Dense>
 #include <vector>
 #include <algorithm>
 #include <cassert>
+#include "arnoldi.hpp"
 #include "tests.hpp"
 
-// using ComplexMatrix = Eigen::MatrixXcd;
-// using ComplexVector = Eigen::VectorXcd;
+using MatType = MatrixColMajor;
 
-// // Construct S matrix from QR factored matrices in a batch
-// int constructSMatrix(const std::vector<ComplexMatrix>& h_Aarray,
-//                      const std::vector<ComplexVector>& h_Tauarray,
-//                      int m, int n, ComplexMatrix& S, int batch_count) {
 
-//     ComplexMatrix Q(m, n);
-//     for (int batch_idx = 0; batch_idx < batch_count; batch_idx++) {
-//         Q = h_Aarray[batch_idx];
-//         // Perform QR factorization
-//         Eigen::HouseholderQR<ComplexMatrix> qr(Q);
-//         Q = qr.householderQ(); // Construct Q from the factorization
-        
-//         // Accumulate product of Q matrices
-//         if (batch_idx == 0) {
-//             S = Q;
-//         } else {
-//             S = S * Q;
-//         }
-//     }
-//     return 0;
-// }
-
-// int computeShift(ComplexMatrix& S,
-//                  const ComplexMatrix& complex_M,
-//                  const ComplexVector& eigenvalues,
-//                  size_t N, size_t m) {
-//     assert(complex_M.rows() == N && complex_M.cols() == N);
-    
-//     size_t batch_count = N - m;
-//     std::vector<size_t> indices(batch_count);
-//     std::iota(indices.begin(), indices.end(), 0);
-
-//     std::sort(indices.begin(), indices.end(),
-//               [&eigenvalues](size_t i1, size_t i2) { return std::norm(eigenvalues[i1]) < std::norm(eigenvalues[i2]); });
-
-//     ComplexVector smallest_eigenvalues(batch_count);
-//     for (size_t i = 0; i < batch_count; ++i) {
-//         smallest_eigenvalues[i] = eigenvalues[indices[i]];
-//     }
-
-//     // Prepare matrices on host
-//     std::vector<ComplexMatrix> h_Aarray(batch_count, ComplexMatrix(N, N));
-//     for (int k = 0; k < batch_count; k++) {
-//         ComplexMatrix M = complex_M;
-//         for (int i = 0; i < N; i++) {
-//             M(i, i) -= smallest_eigenvalues[k];
-//         }
-//         h_Aarray[k] = M;
-//     }
-
-//     std::vector<ComplexVector> h_Tauarray(batch_count, ComplexVector(N));
-
-//     // Perform QR factorization on each matrix
-//     for (int i = 0; i < batch_count; i++) {
-//         Eigen::HouseholderQR<ComplexMatrix> qr(h_Aarray[i]);
-//         h_Aarray[i] = qr.householderQ(); // Q matrix
-//         h_Tauarray[i] = qr.matrixQR().diagonal(); // Tau vector for each QR
-//     }
-
-//     // Construct the shift matrix S
-//     constructSMatrix(h_Aarray, h_Tauarray, N, N, S, batch_count);
-//     isOrthonormal<ComplexMatrix>(S);    
-//     ComplexMatrix prod = S.adjoint() * complex_M * S;
-//     return 0;
-// }
-
-// int reduceEvals(ComplexMatrix& H, ComplexMatrix& Q, size_t N, size_t k) {
-//     print(Q);
-//     print(H);
-    
-//     ComplexVector evals(N);
-//     ComplexMatrix evecs(N, N);
-
-//     eigsolver(H, evals, evecs);
-
-//     ComplexMatrix S(N, N);
-//     computeShift(S, H, evals, N, k);
-
-//     ComplexMatrix temp = S * H * S.adjoint();
-//     return 0;
-// }
-
-using MatrixType = ComplexMatrix;
+//void testRitzPairs(const MatrixType& M, size_t max_iters, size_t basis_size, HostPrecision tol = 1e-5) {
 
 int main(int argc, char* argv[]) {
-    return eigenTest<MatrixType>(argc, argv);
+    cublasHandle_t handle;
+    cusolverDnHandle_t solver_handle;
+    CHECK_CUBLAS(cublasCreate(&handle));
+    CHECK_CUSOLVER(cusolverDnCreate(&solver_handle));
+
+    const size_t& N = (argc > 1) ? std::stoi(argv[1]) : 10;
+    const size_t& max_iters = (argc > 2) ? std::stoi(argv[2]) : 5;
+    const size_t& basis_size = (argc > 3) ? std::stoi(argv[3]) : 2;
+
+    const MatType H = generateRandomHessenbergMatrix<MatType>(N); //MatType::Random(N,N);
+    ComplexKrylovPair q_h(RealKrylovIter<MatType>(H, max_iters, handle));
+
+    EigenPairs H_eigensolution{};
+    eigsolver<MatType>(H, H_eigensolution, N, matrix_type::HESSENBERG);
+    testEigenpairs<MatType, EigenPairs>(H, H_eigensolution);
+    const size_t k = basis_size / 2;
+    reduceEvals(q_h, N, k, handle, solver_handle);
+
+    CHECK_CUBLAS(cublasDestroy(handle));
+    CHECK_CUSOLVER(cusolverDnDestroy(solver_handle));
+    return 0;
 }

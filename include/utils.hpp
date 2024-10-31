@@ -8,6 +8,16 @@
     #include <cmath>
     #include <type_traits>
 
+    #define LAPACKPP_CHECK(call) \
+    do { \
+        int64_t info = (call); \
+        if (info != 0) { \
+            std::cerr << "Error in " #call ": " << info << std::endl; \
+            return info; \
+        } \
+    } while (0)
+
+
     template <typename MatrixType>
     inline bool isHessenberg(const MatrixType& mat, double tol = 1e-10) {
         using Scalar = typename MatrixType::Scalar;
