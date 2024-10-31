@@ -23,77 +23,60 @@
 
     using MatrixType = MatrixColMajor;
 
-    inline int constructSMatrix(cusolverDnHandle_t solver_handle,
+inline int constructSMatrix(cusolverDnHandle_t solver_handle,
                             cublasHandle_t blas_handle,
                             const std::vector<DeviceComplexType*>& h_Aarray, 
                             const std::vector<DeviceComplexType*>& h_Tauarray,
-                            const int m, //Basis Size
-                            const int n, //Q column length (Original Space Size)
+                            const int m, // Basis Size
+                            const int n, // Q column length (Original Space Size)
                             const int lda,
                             ComplexMatrix& S,
                             const int batch_count) {
-        // Allocate device memory for Q matrix and result
-        DeviceComplexType* d_Q;
-        DeviceComplexType* d_S;
-        DeviceComplexType* d_temp; // For intermediate results
-        int* d_info;
 
-        CHECK_CUDA(cudaMalloc(&d_Q, m * m * sizeof(DeviceComplexType)));
-        CHECK_CUDA(cudaMalloc(&d_S, m * m * sizeof(DeviceComplexType)));
-        CHECK_CUDA(cudaMalloc(&d_temp, m * m * sizeof(DeviceComplexType)));
-        CHECK_CUDA(cudaMalloc(&d_info, sizeof(int)));
+    // Allocate device memory for Q matrix and result
+    const DeviceComplexType one = make_cuDoubleComplex(1.0, 0.0);
+    const DeviceComplexType zero = make_cuDoubleComplex(0.0, 0.0);
+    DeviceComplexType* d_Q = cudaMallocChecked<DeviceComplexType>(m * m * sizeof(DeviceComplexType));
+    DeviceComplexType* d_S = cudaMallocChecked<DeviceComplexType>(m * m * sizeof(DeviceComplexType));
+    DeviceComplexType* d_temp = cudaMallocChecked<DeviceComplexType>(m * m * sizeof(DeviceComplexType));
+    int* d_info = cudaMallocChecked<int>(sizeof(int));
+    
+    int lwork;
+    CHECK_CUSOLVER(cusolverDnZungqr_bufferSize(solver_handle, m, m, std::min(m,n), d_Q, lda, h_Tauarray[0], &lwork));
+    DeviceComplexType* d_work = cudaMallocChecked<DeviceComplexType>(lwork * sizeof(DeviceComplexType));
 
-        // Buffer for Zungqr
-        DeviceComplexType* d_work;
-        int lwork;
-        CHECK_CUSOLVER(cusolverDnZungqr_bufferSize(
-            solver_handle, m, m, std::min(m,n),
-            d_Q, lda,
-            h_Tauarray[0],
-            &lwork));
-        CHECK_CUDA(cudaMalloc(&d_work, lwork * sizeof(DeviceComplexType)));
 
-        // Constants for cublas
-        const DeviceComplexType one = make_cuDoubleComplex(1.0, 0.0);
-        const DeviceComplexType zero = make_cuDoubleComplex(0.0, 0.0);
-
-        ComplexMatrix Q(m,n);
-        for (int batch_idx = 0; batch_idx < batch_count; batch_idx++) {
-            // Copy the QR factored matrix to d_Q
-            CHECK_CUDA(cudaMemcpy(d_Q, h_Aarray[batch_idx], 
-                                m * n * sizeof(DeviceComplexType),
-                                cudaMemcpyDeviceToDevice));
-            
-            // Construct Q matrix from the QR factorization
-            CHECK_CUSOLVER(cusolverDnZungqr(
-                solver_handle, m, m, std::min(m,n),
-                d_Q, lda,
-                h_Tauarray[batch_idx],
-                d_work, lwork,
-                d_info));
-
-                // For first iteration, just copy Q to S
-            if (batch_idx == 0) {
-                CHECK_CUDA(cudaMemcpy(d_S, d_Q, m * m * sizeof(DeviceComplexType), cudaMemcpyDeviceToDevice));
-            } else {CHECK_CUBLAS(cublasZgemm(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N, m, m, m, &one, d_S, m, d_Q, m, &zero, d_S, m));}
-        }
-
-        // Copy final result back to host
-        CHECK_CUDA(cudaMemcpy(S.data(), d_S,
-                            m * m * sizeof(DeviceComplexType),
-                            cudaMemcpyDeviceToHost));
-
-        print(S);
+    ComplexMatrix Q(m, n);
+    for (int batch_idx = 0; batch_idx < batch_count; batch_idx++) {
+        // Copy the QR factored matrix to d_Q
+        cudaMemcpyChecked(d_Q, h_Aarray[batch_idx], 
+                        m * m * sizeof(DeviceComplexType),
+                        cudaMemcpyDeviceToDevice);
         
-        // Clean up
-        CHECK_CUDA(cudaFree(d_Q));
-        CHECK_CUDA(cudaFree(d_S));
-        CHECK_CUDA(cudaFree(d_temp));
-        CHECK_CUDA(cudaFree(d_info));
-        CHECK_CUDA(cudaFree(d_work));
+        // Construct Q matrix from the QR factorization
+        CHECK_CUSOLVER(cusolverDnZungqr(solver_handle, m, m, std::min(m,n), d_Q, lda, h_Tauarray[batch_idx], d_work, lwork, d_info));
 
-        return 0;
+        if (batch_idx == 0) {
+            cudaMemcpyChecked(d_S, d_Q, m * m * sizeof(DeviceComplexType), cudaMemcpyDeviceToDevice);
+        } else {
+            CHECK_CUBLAS(cublasZgemm(blas_handle, CUBLAS_OP_N, CUBLAS_OP_N, m, m, m, &one, d_S, m, d_Q, m, &zero, d_S, m));
+        }
     }
+
+    cudaMemcpyChecked(S.data(), d_S,
+                    m * m * sizeof(DeviceComplexType),
+                    cudaMemcpyDeviceToHost);
+
+    assert(isOrthonormal<ComplexMatrix>(S));
+    
+    cudaFreeChecked(d_Q);
+    cudaFreeChecked(d_S);
+    cudaFreeChecked(d_temp);
+    cudaFreeChecked(d_info);
+    cudaFreeChecked(d_work);
+
+    return 0;
+}
 
     inline int computeShift(ComplexMatrix& S,
                     const ComplexMatrix& complex_M, 
@@ -164,8 +147,6 @@
         // Pass the device array pointer and host tau array
         constructSMatrix(solver_handle, handle, h_Aarray, h_Tauarray, N, N, N, S, batch_count);
         
-        assert(isOrthonormal<ComplexMatrix>(S));
-
         cudaFreeChecked(d_matrices);
         cudaFreeChecked(d_tau);
         cudaFreeChecked(d_Aarray);
@@ -173,18 +154,5 @@
 
         return 0;
     }
-
-    // int main() {
-    //     const size_t N = 5;
-    //     const size_t k = 2;
-    //     ComplexVector evals(N);
-    //     ComplexMatrix evecs(N,N);
-    //     ComplexMatrix H = generateRandomHessenbergMatrix<ComplexMatrix>(N);
-    //     ComplexMatrix V = gramSchmidtOrthonormal(N);
-
-    //     eigsolver(H, evals, evecs);
-    //     reduceEvals(H, V, N, k);
-    //     print(V);
-    // }
 
 #endif
