@@ -144,41 +144,6 @@ int ArnoldiTest(int argc, char* argv[]) {
         return EXIT_SUCCESS;
     }
 
-// ============================= EIGENSOLVER TESTS =============================
-
-
-
-// template <typename MatType>
-// int eigenTest(int argc, char* argv[]) {
-//     // Check if the correct number of arguments is provided
-//     if (argc < 2) {
-//         std::cerr << "Usage: " << argv[0] << " <size>" << std::endl;
-//         return 1; // Return an error code
-//     }
-
-//     // Convert the argument to size_t
-//     size_t N = static_cast<size_t>(std::atoi(argv[1]));
-//     if (N == 0) {
-//         std::cerr << "Error: Size must be greater than 0." << std::endl;
-//         return 1; // Return an error code
-//     }
-
-//     // Create an Eigen matrix (example)
-//     MatType H = generateRandomHessenbergMatrix<MatType>(N);
-//     EigenPairs resultHolder{};
-//     if (N < 10) {std::cout << H << std::endl;}
-
-//     eigsolver<MatType, EigenPairs>(H, resultHolder, N, matrix_type::HESSENBERG);
-//     if (N < 10) {std::cout << resultHolder.values << std::endl;}
-//     sortEigenPairs(resultHolder);
-//     testEigenpairs<MatType, EigenPairs>(H, resultHolder);
-//     if (N < 10) {std::cout << resultHolder.values << std::endl;}
-    
-//     RealEigenPairs resultReal = purgeComplex(resultHolder); 
-//     testEigenpairs<MatType, RealEigenPairs>(H, resultReal);
-//     return 0;
-}
-
 // ============================= MATMUL TESTS =============================
 
     // Function to run the GPU matmul and log average speed

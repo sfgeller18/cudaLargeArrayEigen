@@ -58,7 +58,7 @@ struct RealKrylovPair {
 
 
 template <typename MatrixType>
-RealKrylovPair RealKrylovIter(const MatrixType& M, const size_t& max_iters, cublasHandle_t& handle, const HostPrecision& tol = 1e-10) {
+RealKrylovPair RealKrylovIter(const MatrixType& M, const size_t& max_iters, cublasHandle_t& handle, const HostPrecision& tol = default_tol) {
     const HostPrecision matnorm = M.norm();
     size_t N, L; // N=num_rows, L=num_cols
     std::tie(N, L) = shape(M);
@@ -143,13 +143,13 @@ RealKrylovPair RealKrylovIter(const MatrixType& M, const size_t& max_iters, cubl
 }
 
 template <typename MatrixType>
-EigenPairs NaiveRealArnoldi(const MatrixType& M, const size_t& max_iters, const HostPrecision& tol = 1e-5) {
+EigenPairs NaiveRealArnoldi(const MatrixType& M, const size_t& max_iters, cublasHandle_t& handle, const HostPrecision& tol = 1e-5) {
     size_t C = 0; // Number of columns in M
     size_t R = 0; // Number of rows in M
     std::tie(R, C) = shape(M);
 
     // Step 1: Perform Arnoldi iteration to get Q and H_tilde
-    RealKrylovPair krylovResult = RealKrylovIter(M, max_iters, tol);
+    RealKrylovPair krylovResult = RealKrylovIter<MatrixType>(M, max_iters, handle);
     const MatrixColMajor& Q = krylovResult.Q;
     const size_t& m = krylovResult.m;
 

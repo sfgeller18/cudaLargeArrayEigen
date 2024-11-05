@@ -69,30 +69,6 @@
         return Q;
     }
 
-    template <typename MatrixType, typename EigenPairType>
-    bool testEigenpairs(const MatrixType& A, const EigenPairType& eigenPairs) {
-        using ScalarType = typename MatrixType::Scalar;
-        using SecondMatrixType = std::conditional_t<
-            std::is_same<ScalarType, ComplexType>::value || 
-            std::is_same<EigenPairType, EigenPairs>::value, 
-            ComplexMatrix, 
-            MatrixType>;
-            bool result = true;
-
-        for (int i = 0; i < eigenPairs.num_pairs; ++i) {
-            SecondMatrixType Av = A * eigenPairs.vectors.col(i);
-            SecondMatrixType lambda_v = eigenPairs.values[i] * eigenPairs.vectors.col(i);
-            HostPrecision error = (Av - lambda_v).norm();
-            if (error < 1e-10) {
-                std::cout << "Eigenpair " << i + 1 << " is valid.\n";
-            } else {
-                result = false;
-                std::cout << "Failure at Eigenpair " << i + 1 << ". Error of: " << error << "\n";
-                break;
-            }
-        }
-        return result;
-    }
 
 
 
@@ -110,15 +86,18 @@
 
     template <typename MatType>
     MatType generateRandomSymmetricMatrix(size_t N) {
-        MatType A = Matrix::Random(N, N);
-        return A.selfadjointView<Eigen::Upper>();
+        static_assert(!std::is_same<typename MatType::Scalar, std::complex<double>>::value,
+                        "generateRandomSymmetricMatrix only supports real-valued matrices.");
+        MatType A = MatType::Random(N, N);       
+        return A.template selfadjointView<Eigen::Upper>();
     }
 
     template <typename MatType>
     MatType generateRandomHermitianMatrix(size_t N) {
         static_assert(std::is_same_v<typename MatType::Scalar, ComplexType>, 
-                        "HermitianEigenDecomp can only be used with matrices of complex type.");        ComplexMatrix A = ComplexMatrix::Random(N, N);
-        return A.selfadjointView<Eigen::Upper>();
+                        "HermitianEigenDecomp can only be used with matrices of complex type.");
+        MatType A = Matrix::Random(N, N);
+        return A.template selfadjointView<Eigen::Upper>();
     }
     
     bool is_approx_equal(const Vector& a, const Vector& b, float epsilon = 1e-2) {

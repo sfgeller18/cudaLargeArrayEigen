@@ -1,13 +1,15 @@
+#ifndef ARNOLDI_TEST_HPP
+#define ARNOLDI_TEST_HPP
+
 #include "arnoldi.hpp"
 #include <gtest/gtest.h>
 #include <eigen3/Eigen/Dense>  // Include necessary Eigen headers
 #include <cublas_v2.h> // Include necessary CUDA headers
 
-using ComplexTestType = ComplexMatrix;
-using RealTestType = Matrix;
-
-constexpr size_t N = 10; // Test Matrix Size
+constexpr size_t N = 1000; // Test Matrix Size
 constexpr HostPrecision maxResidual = 0.1;
+
+using ArnoldiTestType = ComplexMatrix;
 
 inline void ASSERT_LE_WITH_TOL(HostPrecision value, HostPrecision reference, double tol) {
     ASSERT_TRUE(value <= reference + tol) << "Value " << value << " is not less than or equal to " << reference << " within tolerance " << tol;
@@ -38,7 +40,7 @@ void checkRitzPairs(const MatrixType& M, const EigenPairs& ritzPairs, const doub
 }
 
 TEST(ArnoldiTests, RitzPairsResidualTest) {
-    MatrixColMajor M = MatrixColMajor::Random(N, N);
+    ArnoldiTestType M = ArnoldiTestType::Random(N, N);
     cublasHandle_t handle;
     CHECK_CUBLAS(cublasCreate(&handle));
 
@@ -51,11 +53,11 @@ TEST(ArnoldiTests, RitzPairsResidualTest) {
     CHECK_CUBLAS(cublasDestroy(handle));
 
     // Check residuals
-    checkRitzPairs<MatrixColMajor>(M, ritzPairs);
+    checkRitzPairs<ArnoldiTestType>(M, ritzPairs);
 }
 
 TEST(ArnoldiTests, OrthonormalityTest) {
-    MatrixColMajor M = MatrixColMajor::Random(N, N);
+    ArnoldiTestType M = ArnoldiTestType::Random(N, N);
     cublasHandle_t handle;
     CHECK_CUBLAS(cublasCreate(&handle));
 
@@ -66,7 +68,4 @@ TEST(ArnoldiTests, OrthonormalityTest) {
     ASSERT_TRUE(isOrthonormal(arnoldiResult.Q)) << "The columns of Q are not orthonormal.";
 }
 
-int main(int argc, char **argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
-}
+#endif //ARNOLDI_TEST_HPP

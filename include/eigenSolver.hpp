@@ -43,20 +43,56 @@ RealEigenPairs purgeComplex(const EigenPairs& pair, const double& tol = 1e-10) {
     return {real_evals, real_evecs, count};
 }
 
+
+// Potential In-Place Method for large arrays, will fix later
+// inline void sortEigenPairs(EigenPairs& pair) {
+//     ComplexVector& evals = pair.values;
+//     ComplexMatrix& evecs = pair.vectors;
+//     const size_t& N = pair.num_pairs;
+//     std::vector<size_t> indices(N);
+//     std::iota(indices.begin(), indices.end(), 0);
+
+//     // Sort indices based on eigenvalues
+//     std::sort(indices.begin(), indices.end(),
+//               [&evals](size_t i1, size_t i2) {
+//                   return std::norm(evals[i1]) > std::norm(evals[i2]);
+//               });
+
+
+//     std::vector<bool> visited(N, false);
+
+//     for (size_t i = 0; i < N; ++i) {
+//         if (visited[i] || indices[i] == i) {continue;}
+//         size_t current = i;
+//         while (!visited[current]) {
+//             visited[current] = true;
+//             size_t nextIndex = indices[current];
+
+//             std::swap(evals[current], evals[nextIndex]);
+//             evecs.col(current).swap(evecs.col(nextIndex));
+
+//             current = nextIndex;
+//         }
+//     }
+// }
+
 inline void sortEigenPairs(EigenPairs& pair) {
     ComplexVector& evals = pair.values;
     ComplexMatrix& evecs = pair.vectors;
-    const size_t& N = pair.num_pairs;
+    const size_t N = pair.num_pairs;
+
+    // Create a vector of indices
     std::vector<size_t> indices(N);
     std::iota(indices.begin(), indices.end(), 0);
 
     // Sort indices based on eigenvalues
     std::sort(indices.begin(), indices.end(),
               [&evals](size_t i1, size_t i2) {
-                  return std::norm(evals[i1]) > std::norm(evals[i2]);
+                  return std::norm(evals[i1]) > std::norm(evals[i2]); // Sorting in descending order of norms
               });
 
-
+    // Create sorted eigenvalues and eigenvectors based on sorted indices
+    #ifdef INPLACE_SORT
     std::vector<bool> visited(N, false);
 
     for (size_t i = 0; i < N; ++i) {
@@ -72,6 +108,19 @@ inline void sortEigenPairs(EigenPairs& pair) {
             current = nextIndex;
         }
     }
+    #else
+    ComplexVector sorted_evals(N);
+    ComplexMatrix sorted_evecs(evecs.rows(), evecs.cols());
+
+    for (size_t i = 0; i < N; ++i) {
+        sorted_evals[i] = evals[indices[i]];
+        sorted_evecs.col(i) = evecs.col(indices[i]);
+    }
+
+    // Update the original pairs
+    evals = sorted_evals;
+    evecs = sorted_evecs;
+    #endif
 }
 
 
