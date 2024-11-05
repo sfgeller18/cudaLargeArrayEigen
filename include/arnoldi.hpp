@@ -56,26 +56,6 @@ struct RealKrylovPair {
           m(complexPair.m) {}
 
 
-inline void cublasMGS(cublasHandle_t handle, 
-                       const HostPrecision* d_evecs, 
-                       HostPrecision* d_h, 
-                       HostPrecision* d_result, 
-                       const HostPrecision alpha, 
-                       const HostPrecision neg_one, 
-                       int N, 
-                       int num_iters, 
-                       int i) {
-    // Modified Gram-Schmidt
-    for (int j = 0; j <= i; j++) {
-        cublasGemv(handle, CUBLAS_OP_T, N, 1, &alpha, 
-                   &d_evecs[j * N], 1, d_result, 1, 
-                   &neg_one, &d_h[i * (num_iters + 1) + j], 1);
-        
-        cublasGemv(handle, CUBLAS_OP_N, N, 1, &neg_one, 
-                   &d_evecs[j * N], 1, &d_h[i * (num_iters + 1) + j], 1, 
-                   &alpha, d_result, 1);
-    }
-}
 
 template <typename MatrixType>
 RealKrylovPair RealKrylovIter(const MatrixType& M, const size_t& max_iters, cublasHandle_t& handle, const HostPrecision& tol = 1e-10) {
@@ -97,7 +77,6 @@ RealKrylovPair RealKrylovIter(const MatrixType& M, const size_t& max_iters, cubl
     h_evals[0] = norm(v0);
     for (HostPrecision& v : v0) { v /= h_evals[0]; } // v0 is a norm 1 random vector
 #endif
-
     size_t m = 1;
     const size_t NUM_EVECS_ON_DEVICE = num_iters + 1; 
     const size_t ROWS = DYNAMIC_ROW_ALLOC(N);
@@ -124,7 +103,7 @@ RealKrylovPair RealKrylovIter(const MatrixType& M, const size_t& max_iters, cubl
         matmul_internal<MatrixType>(M, d_M, d_y, d_result, ROWS, N, L, handle);
 
         // Modified Gram-Schmidt
-        cublasMGS(handle, d_evecs, d_h, d_result, alpha, neg_one, N, num_iters, i);
+        cublasMGS(handle, d_evecs, d_h, d_result, N, num_iters, i);
 
         MatrixType h_res(num_iters + 1, num_iters);
         cudaMemcpyChecked(h_res.data(), d_h, (num_iters + 1) * num_iters * sizeof(HostPrecision), cudaMemcpyDeviceToHost);
@@ -164,7 +143,7 @@ RealKrylovPair RealKrylovIter(const MatrixType& M, const size_t& max_iters, cubl
 }
 
 template <typename MatrixType>
-EigenPairs NaiveRealArnoldi(const MatrixType& M, const size_t& max_iters, const size_t& basis_size, const HostPrecision& tol = 1e-5) {
+EigenPairs NaiveRealArnoldi(const MatrixType& M, const size_t& max_iters, const HostPrecision& tol = 1e-5) {
     size_t C = 0; // Number of columns in M
     size_t R = 0; // Number of rows in M
     std::tie(R, C) = shape(M);
@@ -179,11 +158,11 @@ EigenPairs NaiveRealArnoldi(const MatrixType& M, const size_t& max_iters, const 
 
     eigsolver<MatrixColMajor>(H_square, H_eigensolution, m, matrix_type::HESSENBERG);
 
-    const size_t num_eigen_pairs = std::min(H_eigensolution.num_pairs, basis_size);
-    const Vector& eigenvalues = (num_eigen_pairs < H_eigensolution.num_pairs) ? H_eigensolution.values.head(num_eigen_pairs) : H_eigensolution.values;
-    const MatrixColMajor& H_EigenVectors = (num_eigen_pairs < H_eigensolution.num_pairs) ? H_eigensolution.vectors.block(0, 0, m, num_eigen_pairs) : H_eigensolution.vectors;
+    const ComplexVector& eigenvalues = H_eigensolution.values;
+    const ComplexMatrix& H_EigenVectors = H_eigensolution.vectors;
 
-    return {eigenvalues, Q.block(0, 0, R, m) * H_EigenVectors, false, false, num_eigen_pairs};
+    return {eigenvalues, Q.block(0, 0, R, m) * H_EigenVectors, false, false, m};
 }
+
 
 #endif // ARNOLDI_HPP

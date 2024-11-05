@@ -9,7 +9,7 @@
 #include <vector> // No matter what, necessary
 
 #include <type_traits>
-#include <complex>
+#include <complex.h>
 #include <limits>
 
 
@@ -31,7 +31,7 @@
 
 using ComplexType = std::complex<HostPrecision>;
 constexpr size_t PRECISION_SIZE = sizeof(HostPrecision);
-
+constexpr HostPrecision default_tol = 1e-10;
 
 // Conditional type definitions based on USE_EIGEN
 #ifdef USE_EIGEN
@@ -96,7 +96,6 @@ void print(const MatrixType& mat, size_t n = std::numeric_limits<size_t>::max())
     using Scalar = typename MatrixType::Scalar;
     constexpr bool isVector = MatrixType::ColsAtCompileTime == 1;
     constexpr bool isRowMajor = MatrixType::IsRowMajor;
-
     if constexpr (isVector) {
         // Handle vectors
         std::cout << "Vector (" << mat.size() << "):\n";
@@ -166,6 +165,20 @@ void print(const MatrixType& mat, size_t n = std::numeric_limits<size_t>::max())
 
 
 #endif
+
+inline void mollify(Eigen::MatrixXcd& matrix, double tol=default_tol) noexcept {
+    for (int i = 0; i < matrix.rows(); ++i) {
+        for (int j = 0; j < matrix.cols(); ++j) {
+            std::complex<double>& elem = matrix(i, j);
+            if (std::abs(elem.real()) <= tol) {
+                elem.real(0.0);
+            }
+            if (std::abs(elem.imag()) <= tol) {
+                elem.imag(0.0);
+            }
+        }
+    }
+}
 
 
 

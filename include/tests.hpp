@@ -146,57 +146,37 @@ int ArnoldiTest(int argc, char* argv[]) {
 
 // ============================= EIGENSOLVER TESTS =============================
 
-template <typename MatrixType, typename EigenPairType>
-void testEigenpairs(const MatrixType& A, const EigenPairType& eigenPairs) {
-    using ScalarType = typename MatrixType::Scalar;
-    using SecondMatrixType = std::conditional_t<
-        std::is_same<ScalarType, ComplexType>::value || 
-        std::is_same<EigenPairType, EigenPairs>::value, 
-        ComplexMatrix, 
-        MatrixType>;
-
-    for (int i = 0; i < eigenPairs.num_pairs; ++i) {
-        SecondMatrixType Av = A * eigenPairs.vectors.col(i);
-        SecondMatrixType lambda_v = eigenPairs.values[i] * eigenPairs.vectors.col(i);
-
-        if ((Av - lambda_v).norm() < 1e-10) {
-            std::cout << "Eigenpair " << i + 1 << " is valid.\n";
-        } else {
-            std::cout << "Eigenpair " << i + 1 << " is NOT valid.\n";
-        }
-    }
-}
 
 
-template <typename MatType>
-int eigenTest(int argc, char* argv[]) {
-    // Check if the correct number of arguments is provided
-    if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <size>" << std::endl;
-        return 1; // Return an error code
-    }
+// template <typename MatType>
+// int eigenTest(int argc, char* argv[]) {
+//     // Check if the correct number of arguments is provided
+//     if (argc < 2) {
+//         std::cerr << "Usage: " << argv[0] << " <size>" << std::endl;
+//         return 1; // Return an error code
+//     }
 
-    // Convert the argument to size_t
-    size_t N = static_cast<size_t>(std::atoi(argv[1]));
-    if (N == 0) {
-        std::cerr << "Error: Size must be greater than 0." << std::endl;
-        return 1; // Return an error code
-    }
+//     // Convert the argument to size_t
+//     size_t N = static_cast<size_t>(std::atoi(argv[1]));
+//     if (N == 0) {
+//         std::cerr << "Error: Size must be greater than 0." << std::endl;
+//         return 1; // Return an error code
+//     }
 
-    // Create an Eigen matrix (example)
-    MatType H = generateRandomHessenbergMatrix<MatType>(N);
-    EigenPairs resultHolder{};
-    if (N < 10) {std::cout << H << std::endl;}
+//     // Create an Eigen matrix (example)
+//     MatType H = generateRandomHessenbergMatrix<MatType>(N);
+//     EigenPairs resultHolder{};
+//     if (N < 10) {std::cout << H << std::endl;}
 
-    eigsolver<MatType, EigenPairs>(H, resultHolder, N, matrix_type::HESSENBERG);
-    if (N < 10) {std::cout << resultHolder.values << std::endl;}
-    sortEigenPairs(resultHolder);
-    testEigenpairs<MatType, EigenPairs>(H, resultHolder);
-    if (N < 10) {std::cout << resultHolder.values << std::endl;}
+//     eigsolver<MatType, EigenPairs>(H, resultHolder, N, matrix_type::HESSENBERG);
+//     if (N < 10) {std::cout << resultHolder.values << std::endl;}
+//     sortEigenPairs(resultHolder);
+//     testEigenpairs<MatType, EigenPairs>(H, resultHolder);
+//     if (N < 10) {std::cout << resultHolder.values << std::endl;}
     
-    RealEigenPairs resultReal = purgeComplex(resultHolder); 
-    testEigenpairs<MatType, RealEigenPairs>(H, resultReal);
-    return 0;
+//     RealEigenPairs resultReal = purgeComplex(resultHolder); 
+//     testEigenpairs<MatType, RealEigenPairs>(H, resultReal);
+//     return 0;
 }
 
 // ============================= MATMUL TESTS =============================

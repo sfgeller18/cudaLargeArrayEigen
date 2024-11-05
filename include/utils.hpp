@@ -28,12 +28,9 @@
 
         bool ret_val = true;
 
-        for (int i = 2; i < rows; ++i) {          // Start from the 2nd subdiagonal
-            for (int j = 0; j < i - 1 && j < cols; ++j) {
-                double value = isComplex ? std::norm(mat(i, j)) : std::abs(mat(i, j));
-                if (value > tol) {
-                    ret_val = false;
-                }
+        for (int i=2; i<rows; i++) {
+            for (int j = 0; j < i - 1; j++) {
+                if (std::norm(mat(i, j)) > tol * mat.norm()) {return false;}
             }
         }
         // std::cout  << (ret_val ? "IS" : "IS NOT") << " HESSENBERG" <<std::endl;
@@ -57,60 +54,95 @@
         return ret;
     }
 
-    ComplexMatrix gramSchmidtOrthonormal(const size_t& n) {
-            ComplexMatrix input = ComplexMatrix::Random(n,n);
+    template <typename MatType>
+    MatType gramSchmidtOrthonormal(const size_t& n) {
+        MatType input = MatType::Random(n,n);
+        MatType Q(n, n);
+        Q.col(0) = input.col(0).normalized();
+        for (int i = 1; i < n; ++i) {
+            Q.col(i) = input.col(i);
+            for (int j = 0; j < i; ++j) {
+                Q.col(i) -= (Q.col(j).adjoint() * input.col(i))[0] * Q.col(j);
+            }        
+            Q.col(i).normalize();
+        }
+        return Q;
+    }
 
-            ComplexMatrix Q(n, n);
-            
-            // Copy first vector and normalize it
-            Q.col(0) = input.col(0).normalized();
-            
-            for (int i = 1; i < n; ++i) {
-                Q.col(i) = input.col(i);
-                for (int j = 0; j < i; ++j) {
-                    Q.col(i) -= (Q.col(j).adjoint() * input.col(i))[0] * Q.col(j);
-                }        
-                Q.col(i).normalize();
+    template <typename MatrixType, typename EigenPairType>
+    bool testEigenpairs(const MatrixType& A, const EigenPairType& eigenPairs) {
+        using ScalarType = typename MatrixType::Scalar;
+        using SecondMatrixType = std::conditional_t<
+            std::is_same<ScalarType, ComplexType>::value || 
+            std::is_same<EigenPairType, EigenPairs>::value, 
+            ComplexMatrix, 
+            MatrixType>;
+            bool result = true;
+
+        for (int i = 0; i < eigenPairs.num_pairs; ++i) {
+            SecondMatrixType Av = A * eigenPairs.vectors.col(i);
+            SecondMatrixType lambda_v = eigenPairs.values[i] * eigenPairs.vectors.col(i);
+            HostPrecision error = (Av - lambda_v).norm();
+            if (error < 1e-10) {
+                std::cout << "Eigenpair " << i + 1 << " is valid.\n";
+            } else {
+                result = false;
+                std::cout << "Failure at Eigenpair " << i + 1 << ". Error of: " << error << "\n";
+                break;
             }
-            
-            return Q;
         }
+        return result;
+    }
 
 
-        template <typename MatType>
-        MatType generateRandomHessenbergMatrix(size_t N) {
-            MatType H = MatType::Random(N, N);
-            // Zero out elements below the first subdiagonal
-            for (size_t i = 2; i < N; ++i) {
-                for (size_t j = 0; j < i - 1; ++j) {
-                    H(i, j) = 0.0;
-                }
+
+    template <typename MatType>
+    MatType generateRandomHessenbergMatrix(size_t N) {
+        MatType H = MatType::Random(N, N);
+        // Zero out elements below the first subdiagonal
+        for (size_t i = 2; i < N; ++i) {
+            for (size_t j = 0; j < i - 1; ++j) {
+                H(i, j) = 0.0;
             }
-            return H;
         }
+        return H;
+    }
 
-        bool is_approx_equal(const Vector& a, const Vector& b, float epsilon = 1e-2) {
-            if (a.size() != b.size()) return false;
-            for (size_t i = 0; i < a.size(); ++i) {
-                if (std::abs(a[i] - b[i]) > epsilon) {
-                    return false;
-                }
+    template <typename MatType>
+    MatType generateRandomSymmetricMatrix(size_t N) {
+        MatType A = Matrix::Random(N, N);
+        return A.selfadjointView<Eigen::Upper>();
+    }
+
+    template <typename MatType>
+    MatType generateRandomHermitianMatrix(size_t N) {
+        static_assert(std::is_same_v<typename MatType::Scalar, ComplexType>, 
+                        "HermitianEigenDecomp can only be used with matrices of complex type.");        ComplexMatrix A = ComplexMatrix::Random(N, N);
+        return A.selfadjointView<Eigen::Upper>();
+    }
+    
+    bool is_approx_equal(const Vector& a, const Vector& b, float epsilon = 1e-2) {
+        if (a.size() != b.size()) return false;
+        for (size_t i = 0; i < a.size(); ++i) {
+            if (std::abs(a[i] - b[i]) > epsilon) {
+                return false;
             }
-            return true;
         }
+        return true;
+    }
 
-        
-        // Helper function to check if a vector is zero
-        bool isZeroVector(const Vector& vec, const double tol = 1e-10) {
-            return vec.norm() < tol;
-        }
+    
+    // Helper function to check if a vector is zero
+    bool isZeroVector(const Vector& vec, const double tol = 1e-10) {
+        return vec.norm() < tol;
+    }
 
-        // Helper function to check if two vectors are parallel
-        bool areVectorsParallel(const Vector& v1, const Vector& v2, const double tol = 1e-10) {
-            if (isZeroVector(v1) || isZeroVector(v2)) return false;
-            Vector normalized1 = v1.normalized();
-            Vector normalized2 = v2.normalized();
-            return std::abs(std::abs(normalized1.dot(normalized2)) - 1.0) < tol;
-        }
+    // Helper function to check if two vectors are parallel
+    bool areVectorsParallel(const Vector& v1, const Vector& v2, const double tol = 1e-10) {
+        if (isZeroVector(v1) || isZeroVector(v2)) return false;
+        Vector normalized1 = v1.normalized();
+        Vector normalized2 = v2.normalized();
+        return std::abs(std::abs(normalized1.dot(normalized2)) - 1.0) < tol;
+    }
 
 #endif

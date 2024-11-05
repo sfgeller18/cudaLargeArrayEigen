@@ -180,4 +180,30 @@ constexpr cublasNormPtr cublasNorm = getNormFunction();
 constexpr cublasScalePtr cublasScale = getScaleFunction();
 
 
+// ==================== LINALG ROUTINES ====================
+
+inline void cublasMGS(cublasHandle_t handle,
+                     const HostPrecision* d_evecs,
+                     HostPrecision* d_h,
+                     HostPrecision* d_result,
+                     int N,
+                     int num_iters,
+                     int i) {
+    constexpr HostPrecision NEG_ONE = -1.0;
+    constexpr HostPrecision ONE = 1.0;
+    constexpr HostPrecision ZERO = 0.0;
+    for (int j = 0; j <= i; j++) {
+        // Compute projection coefficient <v_j, w> and store in H(j,i)
+        cublasGemv(handle, CUBLAS_OP_T, N, 1, &ONE,
+                   &d_evecs[j * N], N, d_result, 1,
+                   &ZERO, &d_h[i * (num_iters + 1) + j], 1);
+        
+        // Subtract projection: w = w - h_ij * v_j
+        cublasGemv(handle, CUBLAS_OP_N, N, 1, &NEG_ONE,
+                   &d_evecs[j * N], N, &d_h[i * (num_iters + 1) + j], 1,
+                   &ONE, d_result, 1);
+    }
+}
+
+
 #endif // CUDA_MANAGER_HPP

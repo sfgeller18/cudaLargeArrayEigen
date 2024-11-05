@@ -20,6 +20,9 @@ link_directories(${CUDA_LIBRARY_DIRS})
 find_package(LAPACK REQUIRED)
 find_library(LAPACKE_LIB NAMES lapacke REQUIRED)
 
+find_package(GTest REQUIRED)
+include_directories(${GTEST_INCLUDE_DIRS})
+
 # # Find LAPACK++ and BLAS++
 # set(LAPACKPP_DIR "/opt/slate/include")
 # set(BLASPP_DIR "/opt/slate/include/blas")
@@ -46,7 +49,7 @@ set_target_properties(cuda_demo PROPERTIES
 )
 
 # Link against LAPACK++, BLAS++, and other libraries
-target_link_libraries(cuda_demo PRIVATE ${CUDA_LIBRARIES} ${CUBLAS_LIBRARIES} ${CUSOLVER_LIBRARIES} -llapack -llapacke -lblas -llapackpp -lblaspp)
+target_link_libraries(cuda_demo PRIVATE ${GTEST_BOTH_LIBRARIES} ${CUDA_LIBRARIES} ${CUBLAS_LIBRARIES} ${CUSOLVER_LIBRARIES} -llapack -llapacke -lblas -llapackpp -lblaspp)
 
 # Add a check to ensure Clang is correctly recognized for both CUDA and CXX
 message(STATUS "CXX compiler: ${CMAKE_CXX_COMPILER}")
