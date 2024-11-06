@@ -221,25 +221,27 @@ Vector randVecGen(size_t N) {
     return v0;
 }
 
-struct EigenPairs {
-    ComplexVector values;
-    ComplexMatrix vectors;
-    bool realEvals = false;
-    bool realEvecs = false;
-    size_t num_pairs;
-};
+template <typename MatrixType>
+MatrixType initMat(const size_t N) {
+    using ScalarType = typename MatrixType::Scalar;
 
-struct RealEigenPairs {
-    Vector values;
-    Matrix vectors;
-    size_t num_pairs;
-};
+    MatrixType M;
+    
+    if (N > 10000) {
+        M = MatrixType::Zero(N, N);
+        
+        if constexpr (std::is_same<ScalarType, std::complex<double>>::value || 
+                      std::is_same<ScalarType, std::complex<float>>::value) {
+            std::fill(M.data(), M.data() + M.size(), ScalarType(-1.0, -1.0));
+        } else {
+            std::fill(M.data(), M.data() + M.size(), ScalarType(-1.0));
+        }
+    } else {
+        M = MatrixType::Random(N, N);
+    }
 
-struct MixedEigenPairs {
-    Vector values;
-    ComplexMatrix vectors;
-    size_t num_pairs;
-};
+    return M;
+}
 
     
 

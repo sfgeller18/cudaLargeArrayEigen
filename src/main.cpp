@@ -1,72 +1,69 @@
-#include "arnoldi.hpp"
-#include <gtest/gtest.h>
-#include <eigen3/Eigen/Dense>  // Include necessary Eigen headers
-#include <cublas_v2.h> // Include necessary CUDA headers
+#include <iostream>
+#include <vector>
+#include <algorithm>
+#include <cassert>
+#include "shift.hpp"
+#include "structs.hpp"
+#include <chrono>
 
-using ComplexTestType = ComplexMatrix;
-using RealTestType = Matrix;
+// #define CUBLAS_RESTART
+#define EIGEN_RESTART
 
-constexpr size_t N = 10; // Test Matrix Size
-constexpr HostPrecision maxResidual = 0.1;
+using MatType = MatrixColMajor;
 
-inline void ASSERT_LE_WITH_TOL(HostPrecision value, HostPrecision reference, double tol) {
-    ASSERT_TRUE(value <= reference + tol) << "Value " << value << " is not less than or equal to " << reference << " within tolerance " << tol;
-}
 
-// Checks for residuals <= max_residual
-template <typename MatrixType>
-void checkRitzPairs(const MatrixType& M, const EigenPairs& ritzPairs, const double tol = default_tol, const double max_residual = maxResidual) {
-    double matrix_norm = M.norm();
-    constexpr bool isComplex = std::is_same_v<typename MatrixType::Scalar, ComplexType>;
+//TO-DO: FIX WHAT Q MATRIX WE CONSERVATIVE RESIZE
 
-    // Capture ritzPairs to access values within the lambda
-    auto nth_norm = [&ritzPairs, isComplex](size_t i) -> HostPrecision {
-        return isComplex ? std::norm(ritzPairs.values[i]) : std::abs(ritzPairs.values[i]);
-    };
 
-    for (int i = 0; i < std::min<int>(10, ritzPairs.values.size()); ++i) {
-        ComplexType eigenvalue = ritzPairs.values[i];
-        ComplexVector residual = (M * ritzPairs.vectors.col(i)) - eigenvalue * ritzPairs.vectors.col(i);
-        double relative_residual = residual.norm() / (matrix_norm * ritzPairs.vectors.col(i).norm());
 
-        // Check if the relative residual is below the threshold
-        ASSERT_LT(relative_residual, max_residual) << "Relative residual for Ritz pair " << i << " exceeds threshold.";
 
-        // Check the ordering of norms
-        if (i > 0) {ASSERT_LE_WITH_TOL(nth_norm(i), nth_norm(i - 1), default_tol);}
+
+
+int main(int argc, char* argv[]) {
+    cublasHandle_t handle;
+    cusolverDnHandle_t solver_handle;
+    CHECK_CUBLAS(cublasCreate(&handle));
+    CHECK_CUSOLVER(cusolverDnCreate(&solver_handle));
+
+    
+    const size_t& N = (argc > 1) ? std::stoi(argv[1]) : 10;
+    const size_t& max_iters = (argc > 2) ? std::stoi(argv[2]) : 5;
+    const size_t& basis_size = (argc > 3) ? std::stoi(argv[3]) : 2;
+    
+    MatType M;
+    if (N > 10000) {
+        // Allocate the matrix
+        M = MatType::Zero(N, N); // Initialize with zeros first
+
+        // Set all entries to -1
+        double* data = M.data();
+        std::fill(data, data + M.size(), -1.0); // Using std::fill for safety and clarity
+    } else {
+        // If N is not greater than 10000, initialize normally
+        M = MatType::Random(N, N);
     }
-}
+    std::cout << "M Initialized" << std::endl;
+    const double tol = 1e-10 * M.norm();
+    auto start = std::chrono::high_resolution_clock::now();
+    ComplexKrylovPair q_h(RealKrylovIter<MatType>(M, max_iters, handle));
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cout << "Time for Krylov Iter: "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
+              << " ms" << std::endl;
+    std::cout << q_h.H << std::endl;
+    Eigen::MatrixXcd S = Eigen::MatrixXcd::Identity(q_h.m, q_h.m);
 
-TEST(ArnoldiTests, RitzPairsResidualTest) {
-    MatrixColMajor M = MatrixColMajor::Random(N, N);
-    cublasHandle_t handle;
-    CHECK_CUBLAS(cublasCreate(&handle));
+    assert(isOrthonormal<ComplexMatrix>(q_h.Q));
 
-    // Define parameters
-    size_t max_iters = std::min(size_t(100), N - 1);
-    size_t basis_size = 10;
+    reduceArnoldiPair(q_h, basis_size, handle, solver_handle, resize_type::ZEROS);
+   
+    assert(isHessenberg<ComplexMatrix>(q_h.H));
+    assert(isOrthonormal<ComplexMatrix>(q_h.Q.leftCols(basis_size), 1e-4));
 
-    // Compute Ritz pairs
-    EigenPairs ritzPairs = NaiveRealArnoldi(M, max_iters, handle);
+    // std::cout <<q_h.H << std::endl;
+
+    std::cout << "Arnoldi Reduction Test Passed!" << std::endl;
     CHECK_CUBLAS(cublasDestroy(handle));
-
-    // Check residuals
-    checkRitzPairs<MatrixColMajor>(M, ritzPairs);
-}
-
-TEST(ArnoldiTests, OrthonormalityTest) {
-    MatrixColMajor M = MatrixColMajor::Random(N, N);
-    cublasHandle_t handle;
-    CHECK_CUBLAS(cublasCreate(&handle));
-
-    RealKrylovPair arnoldiResult = RealKrylovIter<MatrixColMajor>(M, std::min(size_t(100), N - 1), handle);
-    CHECK_CUBLAS(cublasDestroy(handle));
-
-    // Assert that Q is orthonormal within the specified tolerance
-    ASSERT_TRUE(isOrthonormal(arnoldiResult.Q)) << "The columns of Q are not orthonormal.";
-}
-
-int main(int argc, char **argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+    CHECK_CUSOLVER(cusolverDnDestroy(solver_handle));
+    return 0;
 }

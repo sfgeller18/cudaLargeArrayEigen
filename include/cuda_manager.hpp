@@ -4,8 +4,15 @@
     #include <cuda_runtime.h>
     #include <cublas_v2.h>
     #include <cusolverDn.h>
+    #include "vector.hpp"
 
-using DeviceComplexType = cuDoubleComplex;
+    using DeviceComplexType = cuDoubleComplex;
+    inline __host__ __device__ DeviceComplexType toDeviceComplex(const ComplexType& complex_value) {
+        DeviceComplexType device_value;
+        device_value.x = complex_value.real();
+        device_value.y = complex_value.imag();
+        return device_value;
+    }
 
     
     enum class CuRetType {

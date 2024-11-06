@@ -6,19 +6,14 @@
     //#define CUDA_EIGSOLVER
 
 #include <lapack.hh>   // LAPACK++ 
-#include "vector.hpp"
 #include <complex>
 #include <numeric>
 #include <memory>
 #include "utils.hpp"
 
+#include "structs.hpp"
 
 
-enum matrix_type : char {
-    HESSENBERG = 'H',
-    SELFADJOINT = 'S',
-    REGULAR = 'R'
-};
 
 RealEigenPairs purgeComplex(const EigenPairs& pair, const double& tol = 1e-10) {
     const ComplexVector& eigenvals = pair.values;
