@@ -48,7 +48,6 @@
         } else {
             product = Q.transpose() * Q;
         }
-
         bool ret = (product - MatrixType::Identity(Q.cols(), Q.cols())).norm() < tol;
         std::cout << (ret ? "SUCCESS" : "FAIL") << std::endl;
         return ret;

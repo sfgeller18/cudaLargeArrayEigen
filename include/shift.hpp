@@ -12,11 +12,8 @@
 #include "arnoldi.hpp"
 #include "cuda_manager.hpp"
 
-#define CUBLAS_RESTART
-
-//DeviceComplexType* d_Q = cudaMallocChecked<DeviceComplexType>(batch_count * N * N * sizeof(DeviceComplexType));
-// std::vector<DeviceComplexType*> h_Tauarray(batch_count);
-
+// #define CUBLAS_RESTART
+#define EIGEN_RESTART
 
 #ifdef CUBLAS_RESTART
 inline int cublasComputeQ(DeviceComplexType* d_Q, std::vector<DeviceComplexType*> h_Tauarray, ComplexKrylovPair& q_h, const ComplexVector& eigenvalues, const size_t& basis_size, cublasHandle_t& handle, cusolverDnHandle_t& solver_handle) {
