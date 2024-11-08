@@ -233,7 +233,7 @@ int reduceArnoldiPair(ComplexKrylovPair& q_h, const size_t& basis_size, cublasHa
     cublasQRShift(q_h, H_pairs.values, basis_size, handle, solver_handle);
     #endif
     mollify(q_h.H);
-    std::cout << q_h.H <<std::endl;
+    // std::cout << q_h.H <<std::endl;
     end = std::chrono::high_resolution_clock::now();
     std::cout << "Time for incremental shifts: "
               << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
