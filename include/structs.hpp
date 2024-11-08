@@ -26,7 +26,7 @@ struct MixedEigenPairs {
 
 enum matrix_type : char {
     HESSENBERG = 'H',
-    SELFADJOINT = 'S',
+    SELFADJOINT = 'A',
     REGULAR = 'R'
 };
 

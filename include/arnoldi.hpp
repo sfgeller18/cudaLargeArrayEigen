@@ -27,6 +27,7 @@ struct KrylovTraits<T, std::enable_if_t<!std::is_same_v<typename T::Scalar, Comp
     using ReturnType = KrylovPair<T>;
     
     static constexpr bool is_complex = false;
+    static constexpr bool DEV_PREC_SIZE = sizeof(DeviceScalarType);
 
     static VectorType initial_vector(size_t N) {
         return randVecGen(N);
@@ -56,6 +57,7 @@ struct KrylovTraits<T, std::enable_if_t<std::is_same_v<typename T::Scalar, Compl
     using ReturnType = KrylovPair<T>;
 
     static constexpr bool is_complex = true;
+    static constexpr size_t DEV_PREC_SIZE = sizeof(DeviceComplexType);
 
     static VectorType initial_vector(size_t N) {
         return randVecGen(N);
@@ -74,68 +76,32 @@ struct KrylovTraits<T, std::enable_if_t<std::is_same_v<typename T::Scalar, Compl
     static OutputMatrixType convert(const Matrix& mat) { return mat.cast<ComplexType>(); }
 };
 
-// Main function for RealKrylovIter using traits
+// Internal Logic for Krylov Iteration for re-use without memory re-allocation
 template <typename T>
-typename KrylovTraits<T>::ReturnType 
-KrylovIter(const T& M, const size_t& max_iters, 
-               cublasHandle_t& handle, const HostPrecision& tol = default_tol) {
-    using Traits = KrylovTraits<T>;
-    using DeviceScalarType = typename Traits::DeviceScalarType;
-    using VectorType = typename Traits::VectorType;
-    using OutputMatrixType = typename Traits::OutputMatrixType;
-    using InputMatrixType = typename Traits::InputMatrixType;
-    
+int KrylovIterInternal(
+    const T& M, const size_t first_ind, const size_t last_ind, 
+    cublasHandle_t& handle, const HostPrecision tol,
+    const size_t N, const size_t L, const size_t ROWS,
+    typename KrylovTraits<T>::DeviceScalarType* d_evecs,
+    typename KrylovTraits<T>::DeviceScalarType* d_proj,
+    typename KrylovTraits<T>::DeviceScalarType* d_y,
+    typename KrylovTraits<T>::DeviceScalarType* d_M,
+    typename KrylovTraits<T>::DeviceScalarType* d_result,
+    typename KrylovTraits<T>::DeviceScalarType* d_h, 
+    Vector& norms) {
+    using DeviceScalarType = typename KrylovTraits<T>::DeviceScalarType;
+    using InputMatrixType = typename KrylovTraits<T>::InputMatrixType;
     const HostPrecision matnorm = M.norm();
-    const size_t SCALAR_SIZE = sizeof(DeviceScalarType);
-    size_t N, L;
-    #ifdef USE_EIGEN
-        N = M.rows();
-        L = M.cols();
-    #else
-        N = rows(M);
-        L = cols(M);
-    #endif
-    assert(max_iters < N && "max_iters must be leq than leading dimension of M");
-    
-    Vector norms(max_iters);
-    VectorType v0 = Traits::initial_vector(N);
-    Traits::normalize_vector(v0);
-    
-    OutputMatrixType Q = OutputMatrixType(N, max_iters + 1);
-    OutputMatrixType H_tilde = OutputMatrixType(max_iters + 1, max_iters);
-    
-    const size_t NUM_EVECS_ON_DEVICE = max_iters + 1; 
-    const size_t ROWS = DYNAMIC_ROW_ALLOC(N);
-    const size_t DEV_PREC_SIZE = sizeof(DeviceScalarType);
+    constexpr size_t DEV_PREC_SIZE = sizeof(DeviceScalarType);
     size_t m = 0;
-
-    DeviceScalarType* d_evecs = cudaMallocChecked<DeviceScalarType>(NUM_EVECS_ON_DEVICE * N * DEV_PREC_SIZE);
-    DeviceScalarType* d_proj = cudaMallocChecked<DeviceScalarType>(NUM_EVECS_ON_DEVICE * DEV_PREC_SIZE);
-    DeviceScalarType* d_y = cudaMallocChecked<DeviceScalarType>(N * DEV_PREC_SIZE);
-    DeviceScalarType* d_M = cudaMallocChecked<DeviceScalarType>(ROWS * N * DEV_PREC_SIZE);
-    DeviceScalarType* d_result = cudaMallocChecked<DeviceScalarType>(N * DEV_PREC_SIZE);
-    DeviceScalarType* d_h = cudaMallocChecked<DeviceScalarType>((max_iters + 1) * max_iters * DEV_PREC_SIZE);
-
-    cudaMemcpyChecked(d_y, v0.data(), N * DEV_PREC_SIZE, cudaMemcpyHostToDevice);
-    cudaMemcpyChecked(d_evecs, v0.data(), N * DEV_PREC_SIZE, cudaMemcpyHostToDevice);
-
-    constexpr DevicePrecision alpha = 1.0;
-    constexpr DevicePrecision beta = 0.0;
-    constexpr DevicePrecision neg_one = -1.0;
-
     Vector temp(N);
 
-    // if constexpr (Traits::is_complex) {inv_eval = make_cuDoubleComplex(1.0 / norms[i], 0.0);}
-    // else {inv_eval = 1.0 / norms[i];}
-
-    for (int i = 0; i < max_iters; i++) {
+    for (int i = first_ind; i < last_ind; i++) {
         matmul_internal<InputMatrixType>(M, d_M, d_y, d_result, ROWS, N, L, handle);
-        cublas::MGS<DeviceScalarType>(handle, d_evecs, d_h, d_result, N, max_iters, i);
-
-        OutputMatrixType h_res(max_iters + 1, max_iters);
-        cudaMemcpyChecked(h_res.data(), d_h, (max_iters + 1) * max_iters * sizeof(HostPrecision), cudaMemcpyDeviceToHost);
-
+        
+        cublas::MGS<DeviceScalarType>(handle, d_evecs, d_h, d_result, N, last_ind, i);
         cublas::norm<DeviceScalarType>(handle, L, d_result, 1, &norms[i]);
+        
         DevicePrecision inv_eval = 1.0 / norms[i];
         cublas::scale<DeviceScalarType>(handle, N, &inv_eval, d_result, 1);
 
@@ -147,13 +113,63 @@ KrylovIter(const T& M, const size_t& max_iters,
             break;
         } else {
             m++;
-        }
+        } 
     }
 
+    return m;
+}
+
+
+// Full Memory Handled KrylovIter
+template <typename T>
+typename KrylovTraits<T>::ReturnType 
+KrylovIter(const T& M, const size_t& max_iters, 
+           cublasHandle_t& handle, const HostPrecision& tol = default_tol) {
+    using Traits = KrylovTraits<T>;
+    using DeviceScalarType = typename Traits::DeviceScalarType;
+    using OutputMatrixType = typename Traits::OutputMatrixType;
+    using InputMatrixType = typename Traits::InputMatrixType;
+    using VectorType = typename Traits::VectorType;
+
+    const size_t N = M.rows();  // Assuming Eigen-like interface for simplicity
+    const size_t L = M.cols();
+    assert(max_iters < N && "max_iters must be leq than leading dimension of M");
+
+    Vector norms(max_iters);
+    VectorType v0 = Traits::initial_vector(N);
+    Traits::normalize_vector(v0);
+
+    OutputMatrixType Q = OutputMatrixType(N, max_iters + 1);
+    OutputMatrixType H_tilde = OutputMatrixType(max_iters + 1, max_iters);
+
+    const size_t NUM_EVECS_ON_DEVICE = max_iters + 1;
+    const size_t ROWS = DYNAMIC_ROW_ALLOC(N);
+    const size_t DEV_PREC_SIZE = sizeof(DeviceScalarType);
+
+    // Allocate memory on the device
+    DeviceScalarType* d_evecs = cudaMallocChecked<DeviceScalarType>(NUM_EVECS_ON_DEVICE * N * DEV_PREC_SIZE);
+    DeviceScalarType* d_proj = cudaMallocChecked<DeviceScalarType>(NUM_EVECS_ON_DEVICE * DEV_PREC_SIZE);
+    DeviceScalarType* d_y = cudaMallocChecked<DeviceScalarType>(N * DEV_PREC_SIZE);
+    DeviceScalarType* d_M = cudaMallocChecked<DeviceScalarType>(ROWS * N * DEV_PREC_SIZE);
+    DeviceScalarType* d_result = cudaMallocChecked<DeviceScalarType>(N * DEV_PREC_SIZE);
+    DeviceScalarType* d_h = cudaMallocChecked<DeviceScalarType>((max_iters + 1) * max_iters * DEV_PREC_SIZE);
+
+    cudaMemcpyChecked(d_y, v0.data(), N * DEV_PREC_SIZE, cudaMemcpyHostToDevice);
+    cudaMemcpyChecked(d_evecs, v0.data(), N * DEV_PREC_SIZE, cudaMemcpyHostToDevice);
+
+    // Call KrylovIterInternal
+    size_t m = KrylovIterInternal<T>(M, 0, max_iters, handle, tol, N, L, ROWS,
+                                   d_evecs, d_proj, d_y, d_M, 
+                                   d_result, d_h, norms);
+
+    // Copy results from device to host
     cudaMemcpyChecked(Q.data(), d_evecs, m * N * DEV_PREC_SIZE, cudaMemcpyDeviceToHost);
     assert(isOrthonormal<OutputMatrixType>(Q.block(0, 0, N, m)));
+
     cudaMemcpyChecked(H_tilde.data(), d_h, m * (m+1) * DEV_PREC_SIZE, cudaMemcpyDeviceToHost);
-    for (int j = 0; j < m ; ++j) { H_tilde(j + 1, j) = norms[j]; } // Insert norms back into Hessenberg diagonal
+    for (int j = 0; j < m ; ++j) { 
+        H_tilde(j + 1, j) = norms[j]; 
+    }
 
     // Free device memory
     cudaFree(d_evecs);
@@ -170,6 +186,9 @@ KrylovIter(const T& M, const size_t& max_iters,
     };
 }
 
+
+
+// Interface for working directly with Ritz Pairs of Eigen Matrices
 template <typename T>
 EigenPairs NaiveArnoldi(const T& M, const size_t& max_iters, 
                            cublasHandle_t& handle, const HostPrecision& tol = 1e-5) {

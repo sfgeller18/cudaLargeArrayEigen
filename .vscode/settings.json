@@ -81,6 +81,7 @@
         "specialfunctions": "cpp",
         "csignal": "cpp",
         "any": "cpp",
-        "codecvt": "cpp"
+        "codecvt": "cpp",
+        "forward_list": "cpp"
     }
 }
