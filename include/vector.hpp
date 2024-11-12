@@ -209,6 +209,9 @@ inline void normalize(Vector& vec) {
 }
 
 Vector randVecGen(size_t N) {
+    #ifdef USE_EIGEN
+        return Vector::Random(N);
+    #else
     std::random_device rd;
     std::mt19937 gen(rd()); // Seed the random number generator
     std::normal_distribution<float> dist(0.0f, 1.0f); // Mean = 0, Stddev = 1
@@ -219,6 +222,7 @@ Vector randVecGen(size_t N) {
         v0[i] = dist(gen); // Fill vector with normal distributed values
     }
     return v0;
+    #endif
 }
 
 struct EigenPairs {

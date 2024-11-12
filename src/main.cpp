@@ -6,7 +6,7 @@
 using ComplexTestType = ComplexMatrix;
 using RealTestType = Matrix;
 
-constexpr size_t N = 10; // Test Matrix Size
+constexpr size_t N = 10000; // Test Matrix Size
 constexpr HostPrecision maxResidual = 0.1;
 
 inline void ASSERT_LE_WITH_TOL(HostPrecision value, HostPrecision reference, double tol) {
@@ -14,8 +14,8 @@ inline void ASSERT_LE_WITH_TOL(HostPrecision value, HostPrecision reference, dou
 }
 
 // Checks for residuals <= max_residual
-template <typename MatrixType>
-void checkRitzPairs(const MatrixType& M, const EigenPairs& ritzPairs, const double tol = default_tol, const double max_residual = maxResidual) {
+template <typename MatrixType, typename PT>
+void checkRitzPairs(const MatrixType& M, const PT& ritzPairs, const double tol = default_tol, const double max_residual = maxResidual) {
     double matrix_norm = M.norm();
     constexpr bool isComplex = std::is_same_v<typename MatrixType::Scalar, ComplexType>;
 
@@ -47,7 +47,7 @@ TEST(ArnoldiTests, RitzPairsResidualTest) {
     size_t basis_size = 10;
 
     // Compute Ritz pairs
-    EigenPairs ritzPairs = NaiveRealArnoldi(M, max_iters, handle);
+    EigenPairs ritzPairs = NaiveArnoldi<MatrixColMajor>(M, max_iters, handle);
     CHECK_CUBLAS(cublasDestroy(handle));
 
     // Check residuals
@@ -55,11 +55,11 @@ TEST(ArnoldiTests, RitzPairsResidualTest) {
 }
 
 TEST(ArnoldiTests, OrthonormalityTest) {
-    MatrixColMajor M = MatrixColMajor::Random(N, N);
+    Matrix M = RealTestType::Random(N, N);
     cublasHandle_t handle;
     CHECK_CUBLAS(cublasCreate(&handle));
 
-    RealKrylovPair arnoldiResult = RealKrylovIter<MatrixColMajor>(M, std::min(size_t(100), N - 1), handle);
+    auto arnoldiResult = KrylovIter<Matrix>(M, std::min(size_t(100), N - 1), handle);
     CHECK_CUBLAS(cublasDestroy(handle));
 
     // Assert that Q is orthonormal within the specified tolerance
@@ -70,3 +70,4 @@ int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }
+

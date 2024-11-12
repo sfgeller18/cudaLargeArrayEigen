@@ -4,7 +4,7 @@
 #include "matmul.hpp"
 #include <gtest/gtest.h>
 
-using RTMatType = MatrixRowMajor;
+using RTMatType = ComplexMatrix;
 
 class MatMulTest : public ::testing::TestWithParam<std::tuple<size_t, size_t, bool>> {
 protected:

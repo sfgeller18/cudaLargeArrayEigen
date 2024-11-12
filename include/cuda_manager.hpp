@@ -7,6 +7,39 @@
 
 using DeviceComplexType = cuDoubleComplex;
 
+    template <typename T>
+constexpr T getOne() {
+    if constexpr (std::is_same_v<T, cuDoubleComplex>) {
+        return cuDoubleComplex(1.0, 0.0);
+    } else if constexpr (std::is_same_v<T, cuComplex>) {
+        return make_cuComplex(1.0f, 0.0f);
+    } else {
+        return T(1.0);
+    }
+}
+
+template <typename T>
+constexpr T getZero() {
+    if constexpr (std::is_same_v<T, cuDoubleComplex>) {
+        return cuDoubleComplex(0.0, 0.0);
+    } else if constexpr (std::is_same_v<T, cuComplex>) {
+        return cuDoubleComplex(0.0f, 0.0f);
+    } else {
+        return T(0.0);
+    }
+}
+
+template <typename T>
+constexpr T getNegOne() {
+    if constexpr (std::is_same_v<T, cuDoubleComplex>) {
+        return cuDoubleComplex(-1.0, 0.0);
+    } else if constexpr (std::is_same_v<T, cuComplex>) {
+        return make_cuComplex(-1.0f, 0.0f);
+    } else {
+        return T(-1.0);
+    }
+}
+
     
     enum class CuRetType {
         HOST,
@@ -87,123 +120,210 @@ using DeviceComplexType = cuDoubleComplex;
     }                                                                          \
 }
 
-#if defined(PRECISION_FLOAT)
-    using cublasGemvPtr = cublasStatus_t (*)(cublasHandle_t, cublasOperation_t, int, int,
-                                               const float*, const float*, int,
-                                               const float*, int, const float*, float*, int);
-    using cublasBatchedQRPtr = cublasStatus_t (*)(
-        cublasHandle_t handle, int m, int n, cuComplex* Aarray[], int lda, cuComplex* Tauarray[], int* info, int batchSize);
-    using cublasNormPtr = cublasStatus_t (*)(cublasHandle_t, int, const float*, int, float*);
-    using cublasScalePtr = cublasStatus_t (*)(cublasHandle_t, int, const float*, float*, int);
-#elif defined(PRECISION_DOUBLE)
-    using cublasGemvPtr = cublasStatus_t (*)(cublasHandle_t, cublasOperation_t, int, int,
-                                               const double*, const double*, int,
-                                               const double*, int, const double*, double*, int);
-    using cublasBatchedQRPtr = cublasStatus_t (*)(
-        cublasHandle_t handle, int m, int n, cuDoubleComplex* const Aarray[], int lda, cuDoubleComplex* const Tauarray[], int* info, int batchSize);
-    using cublasNormPtr = cublasStatus_t (*)(cublasHandle_t, int, const double*, int, double*);
-    using cublasScalePtr = cublasStatus_t (*)(cublasHandle_t, int, const double*, double*, int);
-#elif defined(PRECISION_FLOAT16)
-    using cublasGemvPtr = cublasStatus_t (*)(cublasHandle_t, cublasOperation_t, int, int,
-                                               const __half*, const __half*, int,
-                                               const __half*, int, const __half*, __half*, int);
-    using cublasBatchedQRPtr = void*; // No specific function for float16
-    using cublasNormPtr = void*; // No specific function for float16
-    using cublasScalePtr = void*; // No specific function for float16
-#else
-    #error "No precision defined! Please define PRECISION_FLOAT, PRECISION_DOUBLE, or PRECISION_FLOAT16."
-#endif
+namespace cublas {
+    template <typename T>
+    struct GemvTraits;
 
-// Function to return the correct normalization function pointer based on precision
-constexpr cublasNormPtr getNormFunction() {
-#if defined(PRECISION_FLOAT)
-    return cublasSnrm2;
-#elif defined(PRECISION_DOUBLE)
-    return cublasDnrm2;
-#elif defined(PRECISION_FLOAT16)
-    return nullptr; // No normalization function for float16
-#else
-    return nullptr; // Should never reach here due to the preprocessor error
-#endif
-}
+    template <typename T>
+    struct GemmTraits;
 
-// Function to return the correct scaling function pointer based on precision
-constexpr cublasScalePtr getScaleFunction() {
-#if defined(PRECISION_FLOAT)
-    return cublasSscal;
-#elif defined(PRECISION_DOUBLE)
-    return cublasDscal;
-#elif defined(PRECISION_FLOAT16)
-    return nullptr; // No scaling function for float16
-#else
-    return nullptr; // Should never reach here due to the preprocessor error
-#endif
-}
+    template <typename T>
+    struct NormTraits;
 
-// Function to return the correct QR function pointer based on precision
-constexpr cublasBatchedQRPtr getBatchedQRFunction() {
-#if defined(PRECISION_FLOAT)
-    return cublasCgeqrfBatched;
-#elif defined(PRECISION_DOUBLE)
-    return cublasZgeqrfBatched;
-#elif defined(PRECISION_FLOAT16)
-    return nullptr;
-#else
-    return nullptr; // Should never reach here due to the preprocessor error
-#endif
-}
+    template <typename T>
+    struct BatchedQRTraits;
 
-// Function to return the correct gemv function pointer based on precision
-constexpr cublasGemvPtr getGemvFunction() {
-#if defined(PRECISION_FLOAT)
-    return cublasSgemv;
-#elif defined(PRECISION_DOUBLE)
-    return cublasDgemv;
-#elif defined(PRECISION_FLOAT16)
-    return [](cublasHandle_t handle, cublasOperation_t trans, int m, int n,
-              const __half* alpha, const __half* A, int lda,
-              const __half* x, int incx, const __half* beta,
-              __half* y, int incy) -> cublasStatus_t {
-        const __half* A_array[1] = {A};
-        const __half* x_array[1] = {x};
-        __half* y_array[1] = {y};
-        return cublasHgemvBatched(handle, trans, m, n, alpha, A_array, lda,
-                                  x_array, incx, beta, y_array, incy, 1);
-    };#else
-    return nullptr; // Should never reach here due to the preprocessor error
-#endif
-}
+    template <typename T>
+    struct ScaleTraits;
 
-constexpr cublasGemvPtr cublasGemv = getGemvFunction();
-constexpr cublasBatchedQRPtr cublasBatchedComplexQR = getBatchedQRFunction();
-constexpr cublasNormPtr cublasNorm = getNormFunction();
-constexpr cublasScalePtr cublasScale = getScaleFunction();
+    // ==================== TRAIT SPECIALIZATIONS ====================
+
+    template <>
+    struct GemvTraits<DevicePrecision> {
+        #ifdef PRECISION_FLOAT
+            static constexpr auto gemvFunc = &cublasSgemv;
+        #elif PRECISION_DOUBLE
+            static constexpr auto gemvFunc = &cublasDgemv;
+        #else
+            static_assert(false, "Unsupported type for cublasMGS.");
+        #endif
+    };
+
+    template <>
+    struct GemvTraits<DeviceComplexType> {
+        #ifdef PRECISION_FLOAT
+            static constexpr auto gemvFunc = &cublasCgemv;
+        #elif PRECISION_DOUBLE
+            static constexpr auto gemvFunc = &cublasZgemv;
+        #else
+            static_assert(false, "Unsupported type for cublasMGS.");
+        #endif
+    };
+
+
+        template <>
+    struct GemmTraits<DevicePrecision> {
+        #ifdef PRECISION_FLOAT
+            static constexpr auto gemmFunc = &cublasSgemm;
+        #elif PRECISION_DOUBLE
+            static constexpr auto gemmFunc = &cublasDgemm;
+        #else
+            static_assert(false, "Unsupported type for cublasMGS.");
+        #endif
+    };
+
+    template <>
+    struct GemmTraits<DeviceComplexType> {
+        #ifdef PRECISION_FLOAT
+            static constexpr auto gemmFunc = &cublasCgemm;
+        #elif PRECISION_DOUBLE
+            static constexpr auto gemmFunc = &cublasZgemm;
+        #else
+            static_assert(false, "Unsupported type for cublasMGS.");
+        #endif
+    };
+
+
+
+    template <>
+    struct NormTraits<DevicePrecision> {
+        #ifdef PRECISION_FLOAT
+            static constexpr auto normFunc = &cublasSnrm2;
+        #elif PRECISION_DOUBLE
+            static constexpr auto normFunc = &cublasDnrm2;
+        #else
+            static_assert(false, "Unsupported type for cublasMGS.");
+        #endif
+    };
+
+    template <>
+    struct NormTraits<DeviceComplexType> {
+        #ifdef PRECISION_FLOAT
+            static constexpr auto normFunc = &cublasScnrm2;
+        #elif PRECISION_DOUBLE
+            static constexpr auto normFunc = &cublasDznrm2;
+        #else
+            static_assert(false, "Unsupported type for cublasMGS.");
+        #endif
+    };
+
+    
+    template <>
+    struct BatchedQRTraits<DevicePrecision> {
+        #ifdef PRECISION_FLOAT
+            static constexpr auto qrFunc = &cublasSgeqrfBatched;
+        #elif PRECISION_DOUBLE
+            static constexpr auto qrFunc = &cublasDgeqrfBatched;
+        #else
+            static_assert(false, "Unsupported type for cublasMGS.");
+        #endif
+    };
+
+    template <>
+    struct BatchedQRTraits<DeviceComplexType> {
+        #ifdef PRECISION_FLOAT
+            static constexpr auto qrFunc = &cublasCgeqrfBatched;
+        #elif PRECISION_DOUBLE
+            static constexpr auto qrFunc = &cublasZgeqrfBatched;
+        #else
+            static_assert(false, "Unsupported type for cublasMGS.");
+        #endif
+    };
+
+    
+
+
+
+    template <>
+    struct ScaleTraits<DeviceComplexType> {
+        #ifdef PRECISION_FLOAT
+            static constexpr auto scaleFunc = &cublasCsscal;
+        #elif PRECISION_DOUBLE
+            static constexpr auto scaleFunc = &cublasZdscal;
+        #else
+            static_assert(false, "Unsupported type for cublasMGS.");
+        #endif
+    };
+
+    template<>
+    struct ScaleTraits<DevicePrecision> {
+        #ifdef PRECISION_FLOAT
+            static constexpr auto scaleFunc = &cublasSscal;
+        #elif PRECISION_DOUBLE
+            static constexpr auto scaleFunc = &cublasDscal;
+        #else
+            static_assert(false, "Unsupported type for cublasMGS.");
+        #endif
+    };
+
+    // ==================== TRAIT INTERFACES ====================
+
+    template <typename T>
+    inline cublasStatus_t gemv(cublasHandle_t handle, cublasOperation_t trans, int m, int n,
+                const T* alpha, const T* A, int lda,
+                const T* x, int incx, const T* beta,
+                T* y, int incy) {
+        auto cublasGemv = GemvTraits<T>::gemvFunc;
+        return cublasGemv(handle, trans, m, n, alpha, A, lda, x, incx, beta, y, incy);
+    }
+
+    template <typename T>
+    inline cublasStatus_t gemm(cublasHandle_t handle, cublasOperation_t transA, cublasOperation_t transB, 
+                            int m, int n, int k, 
+                            const T* alpha, const T* A, int lda, 
+                            const T* B, int ldb, 
+                            const T* beta, T* C, int ldc) {
+        auto cublasGemm = GemmTraits<T>::gemmFunc;
+        return cublasGemm(handle, transA, transB, m, n, k, alpha, A, lda, B, ldb, beta, C, ldc);
+    }
+
+    template <typename T>
+    inline cublasStatus_t norm(cublasHandle_t handle, int N, const T* d_result, int incx, HostPrecision* norms) {
+        auto cublasNorm = NormTraits<T>::normFunc;
+        return cublasNorm(handle, N, d_result, incx, norms);
+    }
+
+    template <typename T>
+    inline cublasStatus_t batchedQR(cublasHandle_t handle, int m, int n, T** d_Aarray, int lda, T** d_Tauarray, int* d_info, int batch_count) {
+        auto cublasQR = BatchedQRTraits<T>::qrFunc;
+        return cublasQR(handle, m, n, d_Aarray, lda, d_Tauarray, d_info, batch_count);
+    }
+
+    template <typename T>
+    inline cublasStatus_t scale(cublasHandle_t handle, int N, const DevicePrecision* alpha, T* x, int incx) {
+        auto cublasScale = ScaleTraits<T>::scaleFunc;
+        return cublasScale(handle, N, alpha, x, incx);
+    }
+
 
 
 // ==================== LINALG ROUTINES ====================
 
-inline void cublasMGS(cublasHandle_t handle,
-                     const HostPrecision* d_evecs,
-                     HostPrecision* d_h,
-                     HostPrecision* d_result,
+template <typename T>
+inline void MGS(cublasHandle_t handle,
+                     const T* d_evecs,
+                     T* d_h,
+                     T* d_result,
                      int N,
                      int num_iters,
                      int i) {
-    constexpr HostPrecision NEG_ONE = -1.0;
-    constexpr HostPrecision ONE = 1.0;
-    constexpr HostPrecision ZERO = 0.0;
+    constexpr T NEG_ONE = getNegOne<T>();
+    constexpr T ONE = getOne<T>();
+    constexpr T ZERO = getZero<T>();
     for (int j = 0; j <= i; j++) {
         // Compute projection coefficient <v_j, w> and store in H(j,i)
-        cublasGemv(handle, CUBLAS_OP_T, N, 1, &ONE,
+        cublas::gemv<T>(handle, CUBLAS_OP_T, N, 1, &ONE,
                    &d_evecs[j * N], N, d_result, 1,
                    &ZERO, &d_h[i * (num_iters + 1) + j], 1);
         
         // Subtract projection: w = w - h_ij * v_j
-        cublasGemv(handle, CUBLAS_OP_N, N, 1, &NEG_ONE,
+        cublas::gemv<T>(handle, CUBLAS_OP_N, N, 1, &NEG_ONE,
                    &d_evecs[j * N], N, &d_h[i * (num_iters + 1) + j], 1,
                    &ONE, d_result, 1);
     }
 }
+
+} // namespace cublas
 
 
 #endif // CUDA_MANAGER_HPP
