@@ -12,8 +12,6 @@
 
 constexpr size_t MAX_EVEC_ON_DEVICE = 1e4;
 
-struct RealKrylovPair;
-struct ComplexKrylovPair;
 
 template <typename M, typename Enable = void>
 struct BasisTraits;
@@ -150,7 +148,7 @@ KrylovPair<M> KrylovIter(const M& M_, const size_t& max_iters, cublasHandle_t& h
 }
 
 template <typename M>
-EigenPairs NaiveArnoldi(const M& M_, const size_t& max_iters, cublasHandle_t& handle, const HostPrecision& tol = 1e-5) {
+ComplexEigenPairs NaiveArnoldi(const M& M_, const size_t& max_iters, cublasHandle_t& handle, const HostPrecision& tol = 1e-5) {
     using OM = typename BasisTraits<M>::OM;
     size_t C = 0; // Number of columns in M
     size_t R = 0; // Number of rows in M
@@ -167,14 +165,14 @@ EigenPairs NaiveArnoldi(const M& M_, const size_t& max_iters, cublasHandle_t& ha
     const size_t& m = krylovResult.m;
     const OM& Q = krylovResult.Q.block(0, 0, R, m);
     const OM& H_square = krylovResult.H.block(0, 0, m, m);
-    EigenPairs H_eigensolution{};
+    ComplexEigenPairs H_eigensolution{};
 
-    eigsolver<OM>(H_square, H_eigensolution, m, matrix_type::HESSENBERG);
+    eigsolver<OM, matrix_type::HESSENBERG>(H_square, H_eigensolution, m);
 
     const ComplexVector& eigenvalues = H_eigensolution.values;
     const ComplexMatrix& H_EigenVectors = H_eigensolution.vectors;
 
-    return {eigenvalues, Q * H_EigenVectors, false, false, m};
+    return {eigenvalues, Q * H_EigenVectors, m};
 }
 
 

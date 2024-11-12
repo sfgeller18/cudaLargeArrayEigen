@@ -208,7 +208,7 @@ int reduceArnoldiPair(ComplexKrylovPair& q_h, const size_t& basis_size, cublasHa
 
     // Start timing for eigsolver
     auto start = std::chrono::high_resolution_clock::now();
-    eigsolver<ComplexMatrix>(H, H_pairs, q_h.m, matrix_type::HESSENBERG);
+    hessEigSolver<ComplexMatrix>(H, H_pairs, q_h.m);
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << "Time for eigsolver: "
               << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()

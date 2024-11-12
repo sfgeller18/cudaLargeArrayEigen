@@ -225,24 +225,21 @@ Vector randVecGen(size_t N) {
     #endif
 }
 
-struct EigenPairs {
-    ComplexVector values;
-    ComplexMatrix vectors;
-    bool realEvals = false;
-    bool realEvecs = false;
+template <typename ValT, typename VecT>
+struct EigPair {
+    ValT values;
+    VecT vectors;
     size_t num_pairs;
 };
 
-struct RealEigenPairs {
-    Vector values;
-    Matrix vectors;
-    size_t num_pairs;
-};
+typedef EigPair<Vector, Matrix> RealEigenPairs;
+typedef EigPair<ComplexVector, ComplexMatrix> ComplexEigenPairs;
+typedef EigPair<Vector, ComplexMatrix> MixedEigenPairs;
 
-struct MixedEigenPairs {
-    Vector values;
-    ComplexMatrix vectors;
-    size_t num_pairs;
+enum matrix_type : char {
+    HESSENBERG = 'H',
+    SELFADJOINT = 'S',
+    REGULAR = 'R'
 };
 
     
