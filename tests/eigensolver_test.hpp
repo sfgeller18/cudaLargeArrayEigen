@@ -58,5 +58,4 @@ TEST(EigenSolverTests, HermitianEigenDecomp) {
     ASSERT_TRUE(isValid) << "Eigenpairs validation failed for Hermitian decomposition.";
 }
 
-
 #endif // EIGENSOLVER_TESTS_HPP

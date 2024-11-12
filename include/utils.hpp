@@ -17,6 +17,20 @@
         } \
     } while (0)
 
+    template <typename M>
+    void mollify(M& mat) {
+        for (size_t i = 0; i < mat.rows(); ++i) {
+            for (size_t j = 0; j < mat.cols(); ++j) {
+                if (std::abs(mat(i, j).real()) < 1e-10) {
+                    mat(i, j).real(0.0);
+                }
+                if (std::abs(mat(i, j).imag()) < 1e-10) {
+                    mat(i, j).imag(0.0);
+                }
+            }
+        }
+    }
+
 
     template <typename MatrixType>
     inline bool isHessenberg(const MatrixType& mat, double tol = 1e-10) {
@@ -48,7 +62,8 @@
         } else {
             product = Q.transpose() * Q;
         }
-
+        // mollify(product);
+        // print(product);
         bool ret = (product - MatrixType::Identity(Q.cols(), Q.cols())).norm() < tol;
         std::cout << (ret ? "SUCCESS" : "FAIL") << std::endl;
         return ret;

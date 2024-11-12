@@ -37,18 +37,12 @@ struct BasisTraits<M, std::enable_if_t<std::is_same_v<typename M::Scalar, Comple
 };
 
 
-template <typename M>
+template <typename S>
 struct KrylovPair {
-    using MT = BasisTraits<M>::OM;
+    using MT = std::conditional_t<std::is_same_v<S, HostPrecision>, Matrix, ComplexMatrix>;
     MT Q;
     MT H;
     size_t m;
-
-    KrylovPair(const Matrix& q, const Matrix& h, size_t m)
-        : Q(q), H(h), m(m) {}
-
-    // Default constructor
-    KrylovPair() : m(0) {}
 };
 
 template <typename M, typename DS>
@@ -78,8 +72,8 @@ int KrylovIterInternal(typename BasisTraits<M>::OM& Q, typename BasisTraits<M>::
 
     m -= 1;
 
-    cudaMemcpyChecked(Q.data(), d_evecs, (m + 1) * N * PRECISION_SIZE, cudaMemcpyDeviceToHost);
-    cudaMemcpyChecked(H_tilde.data(), d_h, (m + 1) * m * PRECISION_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpyChecked(Q.data(), d_evecs, (m + 1) * N * ALLOC_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpyChecked(H_tilde.data(), d_h, (m + 1) * m * ALLOC_SIZE, cudaMemcpyDeviceToHost);
     for (int j = 0; j < m; ++j) { H_tilde(j + 1, j) = norms[j]; } // Insert norms back into Hessenberg diagonal
 
     return 0;
@@ -87,7 +81,7 @@ int KrylovIterInternal(typename BasisTraits<M>::OM& Q, typename BasisTraits<M>::
 
 
 template <typename M>
-KrylovPair<M> KrylovIter(const M& M_, const size_t& max_iters, cublasHandle_t& handle, const HostPrecision& tol = default_tol) {
+KrylovPair<typename M::Scalar> KrylovIter(const M& M_, const size_t& max_iters, cublasHandle_t& handle, const HostPrecision& tol = default_tol) {
     using S = typename BasisTraits<M>::S;
     using DS = typename BasisTraits<M>::DS;
     using V = typename BasisTraits<M>::V;
@@ -161,7 +155,7 @@ ComplexEigenPairs NaiveArnoldi(const M& M_, const size_t& max_iters, cublasHandl
     #endif
 
     // Step 1: Perform Arnoldi iteration to get Q and H_tilde
-    KrylovPair<M> krylovResult = KrylovIter<M>(M_, max_iters, handle);
+    KrylovPair<typename M::Scalar> krylovResult = KrylovIter<M>(M_, max_iters, handle);
     const size_t& m = krylovResult.m;
     const OM& Q = krylovResult.Q.block(0, 0, R, m);
     const OM& H_square = krylovResult.H.block(0, 0, m, m);

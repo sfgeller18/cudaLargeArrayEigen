@@ -49,7 +49,7 @@ TEST(ArnoldiTests, RitzPairsResidualTest) {
     size_t basis_size = 10;
 
     // Compute Ritz pairs
-    EigenPairs ritzPairs = NaiveRealArnoldi(M, max_iters, handle);
+    auto ritzPairs = NaiveArnoldi<ArnoldiTestType>(M, max_iters, handle);
     CHECK_CUBLAS(cublasDestroy(handle));
 
     // Check residuals
@@ -61,7 +61,7 @@ TEST(ArnoldiTests, OrthonormalityTest) {
     cublasHandle_t handle;
     CHECK_CUBLAS(cublasCreate(&handle));
 
-    RealKrylovPair arnoldiResult = RealKrylovIter<MatrixColMajor>(M, std::min(size_t(100), N - 1), handle);
+    auto arnoldiResult = RealKrylovIter<ArnoldiTestType>(M, std::min(size_t(100), N - 1), handle);
     CHECK_CUBLAS(cublasDestroy(handle));
 
     // Assert that Q is orthonormal within the specified tolerance
