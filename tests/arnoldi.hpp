@@ -39,6 +39,7 @@ void checkRitzPairs(const MatrixType& M, const EigenPairs& ritzPairs, const doub
     }
 }
 
+
 TEST(ArnoldiTests, RitzPairsResidualTest) {
     ArnoldiTestType M = ArnoldiTestType::Random(N, N);
     cublasHandle_t handle;
@@ -61,11 +62,11 @@ TEST(ArnoldiTests, OrthonormalityTest) {
     cublasHandle_t handle;
     CHECK_CUBLAS(cublasCreate(&handle));
 
-    auto arnoldiResult = RealKrylovIter<ArnoldiTestType>(M, std::min(size_t(100), N - 1), handle);
+    KrylovPair<ArnoldiTestType::Scalar> arnoldiResult = KrylovIter<ArnoldiTestType>(M, 5, handle);
     CHECK_CUBLAS(cublasDestroy(handle));
-
     // Assert that Q is orthonormal within the specified tolerance
-    ASSERT_TRUE(isOrthonormal(arnoldiResult.Q)) << "The columns of Q are not orthonormal.";
+    ASSERT_TRUE(isOrthonormal<ComplexMatrix>(arnoldiResult.Q)) << "The columns of Q are not orthonormal.";
 }
+
 
 #endif //ARNOLDI_TEST_HPP

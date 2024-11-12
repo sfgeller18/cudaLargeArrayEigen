@@ -120,6 +120,22 @@ constexpr T getNegOne() {
     }                                                                          \
 }
 
+namespace cuda {
+    template <typename T>
+    struct is_cuda_complex : std::false_type {};
+
+    template <>
+    struct is_cuda_complex<cuComplex> : std::true_type {};
+
+    template <>
+    struct is_cuda_complex<cuDoubleComplex> : std::true_type {};
+    
+    template <typename T>
+    constexpr bool is_device_complex_v = is_cuda_complex<T>::value;
+}
+
+
+
 namespace cublas {
     template <typename T>
     struct GemvTraits;
@@ -299,29 +315,28 @@ namespace cublas {
 
 // ==================== LINALG ROUTINES ====================
 
-template <typename T>
-inline void MGS(cublasHandle_t handle,
-                     const T* d_evecs,
-                     T* d_h,
-                     T* d_result,
-                     int N,
-                     int num_iters,
-                     int i) {
-    constexpr T NEG_ONE = getNegOne<T>();
-    constexpr T ONE = getOne<T>();
-    constexpr T ZERO = getZero<T>();
-    for (int j = 0; j <= i; j++) {
-        // Compute projection coefficient <v_j, w> and store in H(j,i)
-        cublas::gemv<T>(handle, CUBLAS_OP_T, N, 1, &ONE,
-                   &d_evecs[j * N], N, d_result, 1,
-                   &ZERO, &d_h[i * (num_iters + 1) + j], 1);
-        
-        // Subtract projection: w = w - h_ij * v_j
-        cublas::gemv<T>(handle, CUBLAS_OP_N, N, 1, &NEG_ONE,
-                   &d_evecs[j * N], N, &d_h[i * (num_iters + 1) + j], 1,
-                   &ONE, d_result, 1);
+    // Templated Modified Gram-Schmidt for Real and Complex Types
+    template <typename T>
+    inline void MGS(cublasHandle_t handle,
+                        const T* d_evecs,
+                        T* d_h,
+                        T* d_result,
+                        int N,
+                        int num_iters,
+                        int i) {
+        constexpr T NEG_ONE = getNegOne<T>();
+        constexpr T ONE = getOne<T>();
+        constexpr T ZERO = getZero<T>();
+        constexpr bool isComplex = cuda::is_device_complex_v<T>;
+        for (int j = 0; j <= i; j++) {
+            cublas::gemv<T>(handle, isComplex ? CUBLAS_OP_C : CUBLAS_OP_T, N, 1, &ONE,
+                    &d_evecs[j * N], N, d_result, 1,
+                    &ZERO, &d_h[i * (num_iters + 1) + j], 1);
+            cublas::gemv<T>(handle, CUBLAS_OP_N, N, 1, &NEG_ONE,
+                    &d_evecs[j * N], N, &d_h[i * (num_iters + 1) + j], 1,
+                    &ONE, d_result, 1);
+        }
     }
-}
 
 } // namespace cublas
 
