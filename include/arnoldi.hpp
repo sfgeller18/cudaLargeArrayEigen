@@ -53,7 +53,7 @@ int KrylovIterInternal(typename BasisTraits<M>::OM& Q, typename BasisTraits<M>::
 
         matmul_internal<M, DS>(M_, d_M, d_y, d_result, ROWS, N, L, handle);
 
-        cublas::MGS<DS>(handle, d_evecs, d_h, d_result, N, num_iters, i + 1);
+        cublas::MGS<DS>(handle, d_evecs, d_h, d_result, N, num_iters, i);
         cublas::norm<DS>(handle, L, d_result, 1, &norms[i]);
         DevicePrecision inv_eval = 1.0 / norms[i];
         cublas::scale<DS>(handle, N, &inv_eval, d_result, 1);

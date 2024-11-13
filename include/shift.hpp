@@ -12,6 +12,11 @@
 #include "arnoldi.hpp"
 #include "cuda_manager.hpp"
 
+enum resize_type : int16_t {
+    ZEROS = 0,
+    SHRINK = 1
+};
+
 // #define CUBLAS_RESTART
 #define EIGEN_RESTART
 
@@ -197,18 +202,17 @@ inline int cublasQRShift(ComplexKrylovPair& q_h, const ComplexVector& eigenvalue
 
 #endif //GPU_RESTART
 
-// Pair must be passed as Complex Matrix. Modified in Place
-int reduceArnoldiPair(ComplexKrylovPair& q_h, const size_t& basis_size, cublasHandle_t& handle, cusolverDnHandle_t& solver_handle, const resize_type resize_method) {
+// Pair must be passed as Complex Matrix. Modified in Place (H will most likely have complexx evecs)
+int reduceArnoldiPair(ComplexMatrix& Q, ComplexMatrix& H, const size_t& N, size_t& m, const size_t& basis_size, cublasHandle_t& handle, cusolverDnHandle_t& solver_handle, const resize_type resize_method) {
     // Compute eigenvalues and eigenvectors
-    assert(q_h.m > basis_size);
-    ComplexMatrix S = ComplexMatrix::Identity(q_h.m, q_h.m);
-    ComplexMatrix& H = q_h.H;
-    ComplexMatrix& Q = q_h.Q;
-    EigenPairs H_pairs{};
+    assert(m >= basis_size);
+    ComplexMatrix S = ComplexMatrix::Identity(m,m);
+    ComplexMatrix H_square = H.block(0, 0, m, m);
+    ComplexEigenPairs H_pairs{};
 
     // Start timing for eigsolver
     auto start = std::chrono::high_resolution_clock::now();
-    hessEigSolver<ComplexMatrix>(H, H_pairs, q_h.m);
+    hessEigSolver<ComplexMatrix>(H_square, H_pairs, m);
     auto end = std::chrono::high_resolution_clock::now();
     std::cout << "Time for eigsolver: "
               << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
@@ -219,20 +223,20 @@ int reduceArnoldiPair(ComplexKrylovPair& q_h, const size_t& basis_size, cublasHa
     // Start timing for incremental shifts
     start = std::chrono::high_resolution_clock::now();
     #ifdef EIGEN_RESTART
-    Eigen::MatrixXcd Qi(q_h.m, q_h.m);
-    for (int i = 0; i < q_h.m - basis_size; i++) {
-        Eigen::HouseholderQR<Eigen::MatrixXcd> qr(H - H_pairs.values(i) * Eigen::MatrixXcd::Identity(q_h.m, q_h.m));
+    Eigen::MatrixXcd Qi(m, m);
+    for (int i = 0; i < m - basis_size; i++) {
+        Eigen::HouseholderQR<Eigen::MatrixXcd> qr(H_square - H_pairs.values(i) * Eigen::MatrixXcd::Identity(m, m));
         Qi = qr.householderQ();
-        H = Qi.adjoint() * H * Qi;
+        H_square = Qi.adjoint() * H_square * Qi;
         S *= Qi;
-        mollify(H, tol);
+        mollify(H_square, tol);
         mollify(Q, tol);
     }
     #endif
     #ifdef CUBLAS_RESTART
     cublasQRShift(q_h, H_pairs.values, basis_size, handle, solver_handle);
     #endif
-    mollify(q_h.H);
+    mollify(H);
     // std::cout << q_h.H <<std::endl;
     end = std::chrono::high_resolution_clock::now();
     std::cout << "Time for incremental shifts: "
@@ -243,15 +247,21 @@ int reduceArnoldiPair(ComplexKrylovPair& q_h, const size_t& basis_size, cublasHa
 
     // Start timing for resizing
     start = std::chrono::high_resolution_clock::now();
-    if (resize_method == resize_type::ZEROS) {
-        H.bottomRows(q_h.m - basis_size).setZero();
-        H.rightCols(q_h.m - basis_size).setZero();
-        Q.rightCols(q_h.m - basis_size).setZero();
-    } else {
-        H.conservativeResize(basis_size, basis_size);
-        Q.conservativeResize(q_h.m, basis_size);
-        q_h.m = basis_size;
+
+    switch (resize_method) {
+        case resize_type::ZEROS:
+            H = Matrix::Zero(m,m);
+            H.topLeftCorner(basis_size, basis_size) = H_square.topLeftCorner(basis_size, basis_size);
+            Q.rightCols(m - basis_size).setZero();
+            break;
+        case resize_type::SHRINK:
+            H_square.conservativeResize(basis_size, basis_size);
+            H = std::move(H_square);
+            Q.conservativeResize(m, basis_size);
+            m = basis_size;
+            break;
     }
+
     end = std::chrono::high_resolution_clock::now();
     std::cout << "Time for resizing: "
               << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()

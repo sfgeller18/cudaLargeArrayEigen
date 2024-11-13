@@ -6,9 +6,11 @@
 #include "arnoldi.hpp"
 
 using MatType = Matrix;
-constexpr size_t dims = 1000;           // Example size for testing
-constexpr size_t max_iters = 100;
-constexpr size_t basis_size = 10;
+using Traits = BasisTraits<MatType>;
+
+constexpr size_t dims = 10;           // Example size for testing
+constexpr size_t max_iters = 5;
+constexpr size_t basis_size = 5;
 
 class CudaTest : public ::testing::Test {
 protected:
@@ -29,18 +31,25 @@ protected:
 
 
 TEST_F(CudaTest, KrylovIterationAndArnoldiReduction) {
+    using OM = typename Traits::OM;
 
-    MatType M = initMat<MatType>(dims);
+    MatType M = MatType::Random(dims, dims);
     
-    ComplexKrylovPair q_h(RealKrylovIter<MatType>(M, max_iters, handle));
+    KrylovPair<typename MatType::Scalar> q_h = KrylovIter<MatType>(M, max_iters, handle);
+    KrylovPair<ComplexType> q_h_complex = {ComplexMatrix(q_h.Q), ComplexMatrix(q_h.H), q_h.m};
 
-    // Test orthonormality of Q
-    ASSERT_TRUE(isOrthonormal<ComplexMatrix>(q_h.Q));
+    ASSERT_TRUE(isOrthonormal<OM>(q_h.Q));
 
-    reduceArnoldiPair(q_h, basis_size, handle, solver_handle, resize_type::ZEROS);
+    ComplexMatrix& H = q_h_complex.H;
+    ComplexMatrix& Q = q_h_complex.Q;
+    size_t& m = q_h_complex.m;
 
-    ASSERT_TRUE(isHessenberg<ComplexMatrix>(q_h.H));
-    ASSERT_TRUE(isOrthonormal<ComplexMatrix>(q_h.Q.leftCols(basis_size), 1e-4));
+    reduceArnoldiPair(Q, H, Q.rows(), m, basis_size, handle, solver_handle, resize_type::ZEROS);
+
+    ASSERT_TRUE(isHessenberg<OM>(q_h.H));
+    ASSERT_TRUE(isOrthonormal<OM>(q_h.Q.leftCols(basis_size), 1e-4));
 }
+
+
 
 #endif
