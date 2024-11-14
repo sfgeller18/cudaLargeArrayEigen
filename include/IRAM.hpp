@@ -57,7 +57,7 @@ ComplexEigenPairs IRAM(const M& M_, cublasHandle_t& handle, cusolverDnHandle_t& 
     ComplexMatrix H_square(B, B);
 
     const size_t num_loops = std::ceil(A / B);
-    // std::cout << "Num Loops: " << num_loops << std::endl;
+    std::cout << "Entering Arnoldi Iteration" << std::endl;
     for (int i = 0; i < num_loops; i++) {
         auto start_iter = std::chrono::high_resolution_clock::now();
         if (i == 0) {KrylovIterInternal<M, DS, N, N, B>(M_, d_M, d_y, d_result, d_evecs, d_h, norms, ROWS, handle, matnorm);}

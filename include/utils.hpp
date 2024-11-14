@@ -8,6 +8,9 @@
     #include <cmath>
     #include <type_traits>
 
+    // #define DBG_ORTHO
+
+
     #define LAPACKPP_CHECK(call) \
     do { \
         int64_t info = (call); \
@@ -62,7 +65,6 @@
         } else {
             product = Q.transpose() * Q;
         }
-        #define DBG_ORTHO
         #ifdef DBG_ORTHO
         if (N <= 15) {
             std::cout << "Product of Q^H * Q: " << std::endl;

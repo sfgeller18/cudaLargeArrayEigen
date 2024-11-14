@@ -2,10 +2,10 @@
 #include "IRAM.hpp"
 #include <gtest/gtest.h>
 
-constexpr size_t N = 1000; // Test Matrix Size
-constexpr size_t total_iters = 50;
-constexpr size_t max_iters = 10;
-constexpr size_t basis_size = 2;
+constexpr size_t N = 10000; // Test Matrix Size
+constexpr size_t total_iters = 1000;
+constexpr size_t max_iters = 50;
+constexpr size_t basis_size = 10;
 
 constexpr HostPrecision maxResidual = 0.1;
 
@@ -76,6 +76,8 @@ TEST(ArnoldiTests, IRAMTest) {
     cublasCreate(&handle);
     cusolverDnCreate(&solver_handle);
     ArnoldiTestType M = ArnoldiTestType::Random(N, N);
+    HostPrecision matnorm = M.norm();
+    for (auto& x : M.reshaped()) {x /= matnorm;}
     ComplexEigenPairs ritzPairs = IRAM<ArnoldiTestType, N, total_iters, max_iters, basis_size>(M, handle, solver_handle);
     checkRitzPairs<ArnoldiTestType, ComplexEigenPairs, true>(M, ritzPairs);
     cublasDestroy(handle);
