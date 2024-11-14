@@ -1,54 +1,86 @@
-#include <gtest/gtest.h>
-#include "shift.hpp"
 #include "arnoldi.hpp"
+#include "IRAM.hpp"
+#include <gtest/gtest.h>
 
-using MatType = ComplexMatrix;
-using Traits = BasisTraits<MatType>;
+constexpr size_t N = 100; // Test Matrix Size
+constexpr size_t total_iters = 50;
+constexpr size_t max_iters = 10;
+constexpr size_t basis_size = 2;
 
-constexpr size_t dims = 1000;           // Example size for testing
-constexpr size_t max_iters = 100;
-constexpr size_t basis_size = 10;
+constexpr HostPrecision maxResidual = 0.1;
 
-class CudaTest : public ::testing::Test {
-protected:
-    cublasHandle_t handle;
-    cusolverDnHandle_t solver_handle;
+using ArnoldiTestType = ComplexMatrix;
 
-    void SetUp() override {
-        cublasCreate(&handle);
-        cusolverDnCreate(&solver_handle);
+inline void ASSERT_LE_WITH_TOL(HostPrecision value, HostPrecision reference, double tol) {
+    ASSERT_TRUE(value <= reference + tol) << "Value " << value << " is not less than or equal to " << reference << " within tolerance " << tol;
+}
+
+// Checks for residuals <= max_residual
+template <typename MatrixType, typename PT, bool verbose=false>
+void checkRitzPairs(const MatrixType& M, const PT& ritzPairs, const double tol = default_tol, const double max_residual = maxResidual) {
+    double matrix_norm = M.norm();
+    constexpr bool isComplex = std::is_same_v<typename MatrixType::Scalar, ComplexType>;
+
+    auto nth_norm = [&ritzPairs, isComplex](size_t i) -> HostPrecision {
+        return isComplex ? std::norm(ritzPairs.values[i]) : std::abs(ritzPairs.values[i]);
+    };
+
+    for (int i = 0; i < std::min<int>(10, ritzPairs.values.size()); ++i) {
+        ComplexType eigenvalue = ritzPairs.values[i];
+        ComplexVector residual = (M * ritzPairs.vectors.col(i)) - eigenvalue * ritzPairs.vectors.col(i);
+        double residual_norm = residual.norm();
+        double vector_norm = ritzPairs.vectors.col(i).norm();
+        double relative_residual = residual_norm / (matrix_norm * vector_norm);
+        double scaled_residual = residual_norm / matrix_norm;
+
+        ASSERT_LT(relative_residual, max_residual) << "Relative residual for Ritz pair " << i << " exceeds threshold.";
+
+        // Check the ordering of norms
+        if (i > 0) {ASSERT_LE_WITH_TOL(nth_norm(i), nth_norm(i - 1), default_tol);}
+        
+        if (verbose) {
+            std::cout << "Ritz pair " << i + 1 << ":" << std::endl;
+            std::cout << "  Ritz value: " << eigenvalue << std::endl;
+            std::cout << "  Absolute residual norm: " << residual_norm << std::endl;
+            std::cout << "  Relative residual (||Ax - λx||/(||A|| ||x||)): " << relative_residual << std::endl;
+            std::cout << "  Scaled residual (||Ax - λx||/||A||): " << scaled_residual << std::endl;
+            std::cout << "  Matrix norm: " << matrix_norm << std::endl;
+            std::cout << "  Vector norm: " << vector_norm << std::endl;
+            std::cout << std::endl;
+        }
     }
-
-    void TearDown() override {
-        cublasDestroy(handle);
-        cusolverDnDestroy(solver_handle);
-    }
-};
-
-
-
-TEST_F(CudaTest, KrylovIterationAndArnoldiReduction) {
-    using OM = typename Traits::OM;
-
-    MatType M = MatType::Random(dims, dims);
-    
-    KrylovPair<typename MatType::Scalar> q_h = KrylovIter<MatType>(M, max_iters, handle);
-    KrylovPair<ComplexType> q_h_complex = {ComplexMatrix(q_h.Q), ComplexMatrix(q_h.H), q_h.m};
-
-    ASSERT_TRUE(isOrthonormal<OM>(q_h.Q));
-
-    ComplexMatrix& H = q_h_complex.H;
-    ComplexMatrix& Q = q_h_complex.Q;
-    size_t& m = q_h_complex.m;
-
-    reduceArnoldiPair(Q, H, Q.rows(), m, basis_size, handle, solver_handle, resize_type::ZEROS);
-    print(MatType(H.topLeftCorner(basis_size, basis_size)));
-
-    ASSERT_TRUE(isHessenberg<OM>(q_h.H));
-    ASSERT_TRUE(isOrthonormal<OM>(q_h.Q.leftCols(basis_size), 1e-4));
 }
 
 
+TEST(ArnoldiTests, RitzPairsResidualTest) {
+    cublasHandle_t handle;
+    cublasCreate(&handle);
+    ArnoldiTestType M = ArnoldiTestType::Random(N, N);
+    ComplexEigenPairs ritzPairs = NaiveArnoldi<ArnoldiTestType, N, N, max_iters>(M, handle);
+    checkRitzPairs<ArnoldiTestType, ComplexEigenPairs>(M, ritzPairs);
+    cublasDestroy(handle);
+}
+
+// TEST(ArnoldiTests, OrthonormalityTest) {
+//     cublasHandle_t handle;
+//     cublasCreate(&handle);
+//     ArnoldiTestType M = ArnoldiTestType::Random(N, N);
+//     KrylovPair<ArnoldiTestType::Scalar> arnoldiResult = KrylovIter<ArnoldiTestType, N, N, max_iters>(M, handle);
+//     ASSERT_TRUE(isOrthonormal<ComplexMatrix>(arnoldiResult.Q)) << "The columns of Q are not orthonormal.";
+//     cublasDestroy(handle);
+// }
+
+TEST(ArnoldiTests, IRAMTest) {
+    cublasHandle_t handle;
+    cusolverDnHandle_t solver_handle;
+    cublasCreate(&handle);
+    cusolverDnCreate(&solver_handle);
+    ArnoldiTestType M = ArnoldiTestType::Random(N, N);
+    ComplexEigenPairs ritzPairs = IRAM<ArnoldiTestType, N, total_iters, max_iters, basis_size>(M, handle, solver_handle);
+    checkRitzPairs<ArnoldiTestType, ComplexEigenPairs, true>(M, ritzPairs);
+    cublasDestroy(handle);
+    cusolverDnDestroy(solver_handle);
+}
 
 
 

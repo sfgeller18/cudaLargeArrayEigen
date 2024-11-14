@@ -82,7 +82,7 @@ inline void matmul_internal(const M& M_, S* d_M, const S* d_y, S* d_result, size
 while (idx < (isRowMajor ? L : N)) {
     size_t selectedElements = std::min(NUM_ARRAYS, (isRowMajor ? L : N) - idx);
     cudaMemcpyChecked(d_M, M_.data() + idx * (isRowMajor ? N : L), selectedElements * (isRowMajor ? N : L) * ALLOC_SIZE, cudaMemcpyKind::cudaMemcpyHostToDevice);
-    CHECK_CUBLAS(cublas::gemv<S>(handle, isRowMajor ? CUBLAS_OP_T : CUBLAS_OP_N, isRowMajor ? N : L, selectedElements, &ONE, d_M, isRowMajor ? N : L, isRowMajor ? d_y : d_y + idx, 1, &ZERO, isRowMajor ? d_result + idx : d_result, 1));
+    cublas::gemv<S>(handle, isRowMajor ? CUBLAS_OP_T : CUBLAS_OP_N, isRowMajor ? N : L, selectedElements, &ONE, d_M, isRowMajor ? N : L, isRowMajor ? d_y : d_y + idx, 1, &ZERO, isRowMajor ? d_result + idx : d_result, 1);
     #ifdef DEBUG_MATMUL
     dbg_check<S>(d_M, d_y, d_result, selectedElements, idx, N, L, isRowMajor);
     #endif

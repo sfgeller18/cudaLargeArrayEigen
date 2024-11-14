@@ -4,13 +4,14 @@
 #include <gtest/gtest.h>
 #include "shift.hpp"
 #include "arnoldi.hpp"
+#include <ctime>
 
 using MatType = Matrix;
 using Traits = BasisTraits<MatType>;
 
-constexpr size_t dims = 10;           // Example size for testing
-constexpr size_t max_iters = 5;
-constexpr size_t basis_size = 5;
+constexpr size_t dims = 1000;           // Example size for testing
+constexpr size_t max_iters = 100;
+constexpr size_t basis_size = 10;
 
 class CudaTest : public ::testing::Test {
 protected:
@@ -32,23 +33,30 @@ protected:
 
 TEST_F(CudaTest, KrylovIterationAndArnoldiReduction) {
     using OM = typename Traits::OM;
-
+    std::srand(std::time(nullptr));
     MatType M = MatType::Random(dims, dims);
     
     KrylovPair<typename MatType::Scalar> q_h = KrylovIter<MatType>(M, max_iters, handle);
-    KrylovPair<ComplexType> q_h_complex = {ComplexMatrix(q_h.Q), ComplexMatrix(q_h.H), q_h.m};
 
     ASSERT_TRUE(isOrthonormal<OM>(q_h.Q));
 
-    ComplexMatrix& H = q_h_complex.H;
-    ComplexMatrix& Q = q_h_complex.Q;
-    size_t& m = q_h_complex.m;
+    MatType& H = q_h.H;
+    MatType& Q = q_h.Q;
+    size_t& m = q_h.m;
 
-    reduceArnoldiPair(Q, H, Q.rows(), m, basis_size, handle, solver_handle, resize_type::ZEROS);
+    ComplexMatrix H_square(max_iters, max_iters);
+    ComplexMatrix Q_block(dims, max_iters);
+
+    reduceArnoldiPairInternal<MatType, dims, max_iters>(Q, H, basis_size, handle, solver_handle, H_square, Q_block);
+
+    std::cout << "H: " << H.topLeftCorner(10,10) << std::endl;
 
     ASSERT_TRUE(isHessenberg<OM>(q_h.H));
     ASSERT_TRUE(isOrthonormal<OM>(q_h.Q.leftCols(basis_size), 1e-4));
 }
+
+
+
 
 
 

@@ -117,6 +117,7 @@ constexpr T getNegOne() {
     if (status != CUBLAS_STATUS_SUCCESS) {                                     \
         printf("cuBLAS API failed at line %d with error: %d\n",                \
                __LINE__, status);                                              \
+        return EXIT_FAILURE;                                                   \
     }                                                                          \
 }
 

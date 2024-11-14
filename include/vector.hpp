@@ -33,6 +33,15 @@ using ComplexType = std::complex<HostPrecision>;
 constexpr size_t PRECISION_SIZE = sizeof(HostPrecision);
 constexpr HostPrecision default_tol = 1e-10;
 
+template <typename T>
+struct is_complex : std::false_type {};
+
+template <typename T>
+struct is_complex<std::complex<T>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_complex_v = is_complex<T>::value;
+
 // Conditional type definitions based on USE_EIGEN
 #ifdef USE_EIGEN
     #include <eigen3/Eigen/Dense>
@@ -221,6 +230,12 @@ Vector randVecGen(size_t N) {
     for (int i = 0; i < N; ++i) {
         v0[i] = dist(gen); // Fill vector with normal distributed values
     }
+    #ifdef USE_EIGEN
+        v0.normalize();
+    #else
+        HostPrecision Norm = norm(v0);
+        for (HostPrecision& v : v0) { v /= Norm; } // v0 is a norm 1 random vector
+    #endif
     return v0;
     #endif
 }
