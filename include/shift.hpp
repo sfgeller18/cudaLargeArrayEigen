@@ -231,7 +231,7 @@ int reduceArnoldiPairInternal(M& Q, M& H, const size_t& basis_size, cublasHandle
         Qi = qr.householderQ();
         H_square = Qi.adjoint() * H_square * Qi;
         Q_block *= Qi;
-        std::cout << "Iteration " << i << std::endl;
+        // std::cout << "Iteration " << i << std::endl;
         mollify(H_square, tol);
         mollify(Q_block, tol);
     }

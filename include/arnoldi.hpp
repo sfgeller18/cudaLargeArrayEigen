@@ -45,21 +45,21 @@ struct KrylovPair {
     size_t m;
 };
 
+// Internal Logic on Mem Buffers, only possible Memcpy is with matmul. Will handle the small size adequately later but this is as optimal as possible for batched matmuls
 template <typename M, typename DS, size_t N, size_t L, size_t num_iters, size_t first_ind = 0>
-int KrylovIterInternal(typename BasisTraits<M>::OM& Q, typename BasisTraits<M>::OM& H_tilde, size_t& m, const M& M_,
-                        DS* d_M, DS* d_y, DS* d_result, DS* d_evecs, DS* d_h, Vector& norms, const size_t& ROWS, cublasHandle_t& handle, const HostPrecision& matnorm = 1, const HostPrecision& tol = 1e-5) {
+int KrylovIterInternal(const M& M_, DS* d_M, DS* d_y, DS* d_result, DS* d_evecs, DS* d_h, Vector& norms, const size_t& ROWS, cublasHandle_t& handle, const HostPrecision& matnorm = 1, const HostPrecision& tol = 1e-5) {
+        size_t m = 1;
         constexpr size_t ALLOC_SIZE = BasisTraits<M>::ALLOC_SIZE;
         for (int i = 0; i < num_iters - first_ind; i++) {
-
         matmul_internal<M, DS>(M_, d_M, d_y, d_result, ROWS, N, L, handle);
 
-        cublas::MGS<DS>(handle, d_evecs, d_h, d_result, N, num_iters, i);
+        cublas::MGS<DS>(handle, d_evecs, d_h, d_result, N, num_iters, i + first_ind);;
         cublas::norm<DS>(handle, L, d_result, 1, &norms[i]);
         DevicePrecision inv_eval = 1.0 / norms[i];
         cublas::scale<DS>(handle, N, &inv_eval, d_result, 1);
 
         //Device to Device Memcpys
-        cudaMemcpyChecked(&d_evecs[first_ind + (i + 1) * N], d_result, N * ALLOC_SIZE, cudaMemcpyDeviceToDevice);
+        cudaMemcpyChecked(&d_evecs[(first_ind + i + 1) * N], d_result, N * ALLOC_SIZE, cudaMemcpyDeviceToDevice);
         cudaMemcpyChecked(d_y, d_result, N * ALLOC_SIZE, cudaMemcpyDeviceToDevice);
 
         if (norms[i] < tol * matnorm) {
@@ -71,10 +71,6 @@ int KrylovIterInternal(typename BasisTraits<M>::OM& Q, typename BasisTraits<M>::
     }
 
     m -= 1;
-
-    cudaMemcpyChecked(Q.data(), d_evecs, (m + 1) * N * ALLOC_SIZE, cudaMemcpyDeviceToHost);
-    cudaMemcpyChecked(H_tilde.data(), d_h, (m + 1) * m * ALLOC_SIZE, cudaMemcpyDeviceToHost);
-    for (int j = 0; j < m; ++j) { H_tilde(j + 1, j) = norms[j]; } // Insert norms back into Hessenberg diagonal
 
     return 0;
 }
@@ -94,14 +90,8 @@ KrylovPair<typename M::Scalar> KrylovIter(const M& M_, cublasHandle_t& handle, c
 
     assert(max_iters < N && "max_iters must be leq than leading dimension of M");
     Vector norms(max_iters);
-    V v0 = randVecGen(N);
+    V v0 = randVecGen<V>(N);
 
-    #ifdef USE_EIGEN
-        v0.normalize();
-    #else
-        HostPrecision Norm = norm(v0);
-        for (HostPrecision& v : v0) { v /= Norm; } // v0 is a norm 1 random vector
-    #endif
     size_t m = 1;
     const size_t ROWS = DYNAMIC_ROW_ALLOC(N);
 
@@ -117,10 +107,15 @@ KrylovPair<typename M::Scalar> KrylovIter(const M& M_, cublasHandle_t& handle, c
     cudaMemcpyChecked(d_y, v0.data(), N * ALLOC_SIZE, cudaMemcpyHostToDevice);
     cudaMemcpyChecked(d_evecs, v0.data(), N * ALLOC_SIZE, cudaMemcpyHostToDevice);
 
-    KrylovIterInternal<M, DS, N, L, max_iters>(Q, H_tilde, m, M_, d_M, d_y, d_result, d_evecs, d_h, norms, ROWS, handle, matnorm, tol);
+    KrylovIterInternal<M, DS, N, L, max_iters>(M_, d_M, d_y, d_result, d_evecs, d_h, norms, ROWS, handle, matnorm, tol);
 
-    assert(isOrthonormal<OM>(Q.block(0,0,N,m)));
-    assert(isHessenberg<OM>(H_tilde.block(0,0,m, m)));
+    cudaMemcpyChecked(Q.data(), d_evecs, (max_iters + 1) * N * ALLOC_SIZE, cudaMemcpyDeviceToHost);
+    cudaMemcpyChecked(H_tilde.data(), d_h, (max_iters + 1) * m * ALLOC_SIZE, cudaMemcpyDeviceToHost);
+    for (int j = 0; j < max_iters; ++j) { H_tilde(j + 1, j) = norms[j]; } // Insert norms back into Hessenberg diagonal
+
+    
+    assert(isOrthonormal<OM>(Q.block(0,0,N,max_iters)));
+    assert(isHessenberg<OM>(H_tilde.block(0,0,m, max_iters)));
 
     // Free device memory
     cudaFree(d_evecs);
@@ -130,7 +125,7 @@ KrylovPair<typename M::Scalar> KrylovIter(const M& M_, cublasHandle_t& handle, c
     cudaFree(d_result);
     cudaFree(d_h);
 
-    return {Q, H_tilde, m};
+    return {Q, H_tilde, max_iters};
 }
 
 template <typename M, size_t N, size_t L, size_t max_iters>

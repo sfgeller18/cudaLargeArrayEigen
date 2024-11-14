@@ -62,9 +62,14 @@
         } else {
             product = Q.transpose() * Q;
         }
-        
-        mollify(product);
-        print(product);
+        #define DBG_ORTHO
+        #ifdef DBG_ORTHO
+        if (N <= 15) {
+            std::cout << "Product of Q^H * Q: " << std::endl;
+            mollify(product);
+            print(product);
+        }
+        #endif
         bool ret = (product - MatrixType::Identity(Q.cols(), Q.cols())).norm() < tol;
         std::cout << (ret ? "SUCCESS" : "FAIL") << std::endl;
         return ret;

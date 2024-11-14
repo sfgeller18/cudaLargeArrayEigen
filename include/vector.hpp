@@ -217,9 +217,12 @@ inline void normalize(Vector& vec) {
     }
 }
 
-Vector randVecGen(size_t N) {
+template <typename V>
+V randVecGen(size_t N) {
     #ifdef USE_EIGEN
-        return Vector::Random(N);
+        V v0 = V::Random(N);
+        v0.normalize();
+        return v0;
     #else
     std::random_device rd;
     std::mt19937 gen(rd()); // Seed the random number generator
@@ -230,12 +233,8 @@ Vector randVecGen(size_t N) {
     for (int i = 0; i < N; ++i) {
         v0[i] = dist(gen); // Fill vector with normal distributed values
     }
-    #ifdef USE_EIGEN
-        v0.normalize();
-    #else
-        HostPrecision Norm = norm(v0);
-        for (HostPrecision& v : v0) { v /= Norm; } // v0 is a norm 1 random vector
-    #endif
+    HostPrecision Norm = norm(v0);
+    for (HostPrecision& v : v0) { v /= Norm; } // v0 is a norm 1 random vector
     return v0;
     #endif
 }

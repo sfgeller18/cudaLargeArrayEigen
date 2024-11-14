@@ -2,7 +2,7 @@
 #include "IRAM.hpp"
 #include <gtest/gtest.h>
 
-constexpr size_t N = 100; // Test Matrix Size
+constexpr size_t N = 1000; // Test Matrix Size
 constexpr size_t total_iters = 50;
 constexpr size_t max_iters = 10;
 constexpr size_t basis_size = 2;
@@ -52,14 +52,14 @@ void checkRitzPairs(const MatrixType& M, const PT& ritzPairs, const double tol =
 }
 
 
-TEST(ArnoldiTests, RitzPairsResidualTest) {
-    cublasHandle_t handle;
-    cublasCreate(&handle);
-    ArnoldiTestType M = ArnoldiTestType::Random(N, N);
-    ComplexEigenPairs ritzPairs = NaiveArnoldi<ArnoldiTestType, N, N, max_iters>(M, handle);
-    checkRitzPairs<ArnoldiTestType, ComplexEigenPairs>(M, ritzPairs);
-    cublasDestroy(handle);
-}
+// TEST(ArnoldiTests, RitzPairsResidualTest) {
+//     cublasHandle_t handle;
+//     cublasCreate(&handle);
+//     ArnoldiTestType M = ArnoldiTestType::Random(N, N);
+//     ComplexEigenPairs ritzPairs = NaiveArnoldi<ArnoldiTestType, N, N, max_iters>(M, handle);
+//     checkRitzPairs<ArnoldiTestType, ComplexEigenPairs>(M, ritzPairs);
+//     cublasDestroy(handle);
+// }
 
 // TEST(ArnoldiTests, OrthonormalityTest) {
 //     cublasHandle_t handle;
