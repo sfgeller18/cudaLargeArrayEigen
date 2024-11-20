@@ -150,6 +150,3 @@ inline auto matmulDevice(const M& M_, const V& y) {
     }
 }
 #endif // MATMUL_HPP
-
-
-
