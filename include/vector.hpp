@@ -33,6 +33,15 @@ using ComplexType = std::complex<HostPrecision>;
 constexpr size_t PRECISION_SIZE = sizeof(HostPrecision);
 constexpr HostPrecision default_tol = 1e-10;
 
+template <typename T>
+struct is_complex : std::false_type {};
+
+template <typename T>
+struct is_complex<std::complex<T>> : std::true_type {};
+
+template <typename T>
+constexpr bool is_complex_v = is_complex<T>::value;
+
 // Conditional type definitions based on USE_EIGEN
 #ifdef USE_EIGEN
     #include <eigen3/Eigen/Dense>
@@ -208,7 +217,13 @@ inline void normalize(Vector& vec) {
     }
 }
 
-Vector randVecGen(size_t N) {
+template <typename V>
+V randVecGen(size_t N) {
+    #ifdef USE_EIGEN
+        V v0 = V::Random(N);
+        v0.normalize();
+        return v0;
+    #else
     std::random_device rd;
     std::mt19937 gen(rd()); // Seed the random number generator
     std::normal_distribution<float> dist(0.0f, 1.0f); // Mean = 0, Stddev = 1
@@ -218,30 +233,28 @@ Vector randVecGen(size_t N) {
     for (int i = 0; i < N; ++i) {
         v0[i] = dist(gen); // Fill vector with normal distributed values
     }
+    HostPrecision Norm = norm(v0);
+    for (HostPrecision& v : v0) { v /= Norm; } // v0 is a norm 1 random vector
     return v0;
+    #endif
 }
 
-template <typename MatrixType>
-MatrixType initMat(const size_t N) {
-    using ScalarType = typename MatrixType::Scalar;
+template <typename ValT, typename VecT>
+struct EigPair {
+    ValT values;
+    VecT vectors;
+    size_t num_pairs;
+};
 
-    MatrixType M;
-    
-    if (N > 10000) {
-        M = MatrixType::Zero(N, N);
-        
-        if constexpr (std::is_same<ScalarType, std::complex<double>>::value || 
-                      std::is_same<ScalarType, std::complex<float>>::value) {
-            std::fill(M.data(), M.data() + M.size(), ScalarType(-1.0, -1.0));
-        } else {
-            std::fill(M.data(), M.data() + M.size(), ScalarType(-1.0));
-        }
-    } else {
-        M = MatrixType::Random(N, N);
-    }
+typedef EigPair<Vector, Matrix> RealEigenPairs;
+typedef EigPair<ComplexVector, ComplexMatrix> ComplexEigenPairs;
+typedef EigPair<Vector, ComplexMatrix> MixedEigenPairs;
 
-    return M;
-}
+enum matrix_type : char {
+    HESSENBERG = 'H',
+    SELFADJOINT = 'S',
+    REGULAR = 'R'
+};
 
     
 

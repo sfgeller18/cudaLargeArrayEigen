@@ -6,16 +6,39 @@
     //#define CUDA_EIGSOLVER
 
 #include <lapack.hh>   // LAPACK++ 
+#include "vector.hpp"
 #include <complex>
 #include <numeric>
 #include <memory>
 #include "utils.hpp"
 
-#include "structs.hpp"
+template <typename T>
+inline HostPrecision magnitude(const T& val) {
+    if constexpr (std::is_arithmetic_v<T>) {return std::abs(val);}
+    else {return std::norm(val);}
+}
 
 
+template <typename M, matrix_type T, typename Enable=void>
+struct EigTraits;
 
-RealEigenPairs purgeComplex(const EigenPairs& pair, const double& tol = 1e-10) {
+template <typename M, matrix_type T>
+struct EigTraits<M, T, std::enable_if_t<T == matrix_type::SELFADJOINT, void>> {
+    using ValT = Vector;
+    using VecT = std::conditional_t<std::is_same_v<typename M::Scalar, ComplexType>, ComplexMatrix, Matrix>;
+    using PT = EigPair<ValT, VecT>;
+};
+
+// Specialization for non-SELFADJOINT matrices
+template <typename M, matrix_type T>
+struct EigTraits<M, T, std::enable_if_t<T != matrix_type::SELFADJOINT, void>> {
+    using ValT = ComplexVector;
+    using VecT = ComplexMatrix;
+    using PT = EigPair<ValT, VecT>;
+};
+
+
+RealEigenPairs purgeComplex(const ComplexEigenPairs& pair, const double& tol = 1e-10) {
     const ComplexVector& eigenvals = pair.values;
     const ComplexMatrix& eigenvecs = pair.vectors;
     const size_t& N = pair.num_pairs;
@@ -71,9 +94,10 @@ RealEigenPairs purgeComplex(const EigenPairs& pair, const double& tol = 1e-10) {
 //     }
 // }
 
-inline void sortEigenPairs(EigenPairs& pair) {
-    ComplexVector& evals = pair.values;
-    ComplexMatrix& evecs = pair.vectors;
+template <typename ValT, typename VecT>
+inline void sortEigenPairs(EigPair<ValT, VecT>& pair) {
+    ValT& evals = pair.values;
+    VecT& evecs = pair.vectors;
     const size_t N = pair.num_pairs;
 
     // Create a vector of indices
@@ -83,7 +107,7 @@ inline void sortEigenPairs(EigenPairs& pair) {
     // Sort indices based on eigenvalues
     std::sort(indices.begin(), indices.end(),
               [&evals](size_t i1, size_t i2) {
-                  return std::norm(evals[i1]) > std::norm(evals[i2]); // Sorting in descending order of norms
+                  return magnitude(evals[i1]) > magnitude(evals[i2]); 
               });
 
     // Create sorted eigenvalues and eigenvectors based on sorted indices
@@ -104,8 +128,8 @@ inline void sortEigenPairs(EigenPairs& pair) {
         }
     }
     #else
-    ComplexVector sorted_evals(N);
-    ComplexMatrix sorted_evecs(evecs.rows(), evecs.cols());
+    ValT sorted_evals(N);
+    VecT sorted_evecs(evecs.rows(), evecs.cols());
 
     for (size_t i = 0; i < N; ++i) {
         sorted_evals[i] = evals[indices[i]];
@@ -120,7 +144,7 @@ inline void sortEigenPairs(EigenPairs& pair) {
 
 
 template <typename MatrixType>
-inline int HessenbergLapackEigenDecomp(const MatrixType& eigenMatrix, EigenPairs& resultHolder, const size_t& n) {
+inline int HessenbergLapackEigenDecomp(const MatrixType& eigenMatrix, ComplexEigenPairs& resultHolder, const size_t& n) {
     Eigen::MatrixXcd H = eigenMatrix;
     Eigen::VectorXcd w(n);
     Eigen::MatrixXcd Z(n, n);
@@ -138,19 +162,21 @@ inline int HessenbergLapackEigenDecomp(const MatrixType& eigenMatrix, EigenPairs
 
     ComplexMatrix evecs = Z * VR; // Ensure ComplexMatrix is defined correctly
 
-    resultHolder = {w, evecs, false, false, n};
+    resultHolder = {w, evecs, n};
 
     return 0; // Return success
 }
 
+// ========================= BACKEND SOLVERS =========================
+
 // #ifdef EIGEN_EIGSOLVER
 template <typename MatType>
-inline int complex_eigen_eigsolver(const MatType& A, EigenPairs& resultHolder, const size_t& N) {
+inline int complex_eigen_eigsolver(const MatType& A, ComplexEigenPairs& resultHolder, const size_t& N) {
 using EigenSolver = std::conditional_t<std::is_same_v<typename MatType::Scalar, ComplexType>, 
                                         Eigen::ComplexEigenSolver<MatType>, 
                                         Eigen::EigenSolver<MatType>>;
     EigenSolver solver(A);
-    resultHolder = {solver.eigenvalues(), solver.eigenvectors(),false, false, N};
+    resultHolder = {solver.eigenvalues(), solver.eigenvectors(), N};
     return 0;
 }
 
@@ -180,42 +206,43 @@ inline int HermitianEigenDecomp(const MatType& A, MixedEigenPairs& resultHolder,
 
 
 
+// ========================= EIGENSOLVER =========================
 
-
-
-#include <iostream>
-
-
-
-template <typename MatType>
-inline void eigsolver(const MatType& A, EigenPairs& resultHolder, const size_t& N, 
-                      const matrix_type type = matrix_type::REGULAR) {
-    if (type == matrix_type::HESSENBERG) {
-        HessenbergLapackEigenDecomp<MatType>(A, resultHolder, N);
-    } else if (type == matrix_type::SELFADJOINT) {
-        if constexpr (std::is_same_v<typename MatType::Scalar, ComplexType>) {
-            MixedEigenPairs tempHolder{};
-            HermitianEigenDecomp<MatType>(A, tempHolder, N);
-            resultHolder.values = tempHolder.values;
-            resultHolder.vectors = tempHolder.vectors;
-            resultHolder.realEvals = true;
-            resultHolder.realEvecs = true;
-            resultHolder.num_pairs = N;
-
-        } else {
-            RealEigenPairs tempHolder{};
-           RealSymmetricEigenDecomp<MatType>(A, tempHolder, N);
-            resultHolder.values = tempHolder.values;
-            resultHolder.vectors = tempHolder.vectors;
-            resultHolder.realEvals = true;
-            resultHolder.realEvecs = false;
-            resultHolder.num_pairs = N;
-        }
-    } else {
-        complex_eigen_eigsolver<MatType>(A, resultHolder, N);
-    }
+template <typename M, matrix_type T>
+inline void eigsolver(const M& A, typename EigTraits<M,T>::PT& resultHolder, const size_t& N) {
+    if constexpr (T == matrix_type::HESSENBERG) {
+        HessenbergLapackEigenDecomp<M>(A, resultHolder, N);
+    } else if constexpr (T == matrix_type::SELFADJOINT) {
+        if constexpr (std::is_same_v<typename M::Scalar, ComplexType>) {
+            HermitianEigenDecomp<M>(A, resultHolder, N);
+        } else {RealSymmetricEigenDecomp<M>(A, resultHolder, N);}
+    } else {complex_eigen_eigsolver<M>(A, resultHolder, N);}
     sortEigenPairs(resultHolder);
 }
+
+
+// ========================= FRONT-FACING INTERFACE =========================
+
+template <typename M>
+inline void eigSolver(const M& A, ComplexEigenPairs& resultHolder, const size_t& N) {
+    eigsolver<M, matrix_type::REGULAR>(A, resultHolder, N);
+}
+
+template <typename M>
+inline void hessEigSolver(const M& A, ComplexEigenPairs& resultHolder, const size_t& N) {
+    eigsolver<M, matrix_type::HESSENBERG>(A, resultHolder, N);
+}
+
+template <typename M>
+inline void hermitianEigSolver(const M& A, MixedEigenPairs& resultHolder, const size_t& N) {
+    eigsolver<M, matrix_type::SELFADJOINT>(A, resultHolder, N);
+}
+
+template <typename M>
+inline void realSymmetricEigSolver(const M& A, RealEigenPairs& resultHolder, const size_t& N) {
+    eigsolver<M, matrix_type::SELFADJOINT>(A, resultHolder, N);
+}
+
 
 
 

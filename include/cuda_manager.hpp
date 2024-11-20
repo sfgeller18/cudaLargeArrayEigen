@@ -4,15 +4,8 @@
     #include <cuda_runtime.h>
     #include <cublas_v2.h>
     #include <cusolverDn.h>
-    #include "vector.hpp"
 
-    #ifdef PRECISION_FLOAT
-        using DeviceComplexType = cuComplex;
-    #elif PRECISION_DOUBLE
-        using DeviceComplexType = cuDoubleComplex;
-    #endif
-
-
+using DeviceComplexType = cuDoubleComplex;
 
     template <typename T>
 constexpr T getOne() {
@@ -46,13 +39,6 @@ constexpr T getNegOne() {
         return T(-1.0);
     }
 }
-
-    inline __host__ __device__ DeviceComplexType toDeviceComplex(const ComplexType& complex_value) {
-        DeviceComplexType device_value;
-        device_value.x = complex_value.real();
-        device_value.y = complex_value.imag();
-        return device_value;
-    }
 
     
     enum class CuRetType {
@@ -131,11 +117,25 @@ constexpr T getNegOne() {
     if (status != CUBLAS_STATUS_SUCCESS) {                                     \
         printf("cuBLAS API failed at line %d with error: %d\n",                \
                __LINE__, status);                                              \
+        return EXIT_FAILURE;                                                   \
     }                                                                          \
 }
 
+namespace cuda {
+    template <typename T>
+    struct is_cuda_complex : std::false_type {};
 
-// ==================== FORWARD TRAIT DECLARATIONS ====================
+    template <>
+    struct is_cuda_complex<cuComplex> : std::true_type {};
+
+    template <>
+    struct is_cuda_complex<cuDoubleComplex> : std::true_type {};
+    
+    template <typename T>
+    constexpr bool is_device_complex_v = is_cuda_complex<T>::value;
+}
+
+
 
 namespace cublas {
     template <typename T>
@@ -313,35 +313,33 @@ namespace cublas {
     }
 
 
+
 // ==================== LINALG ROUTINES ====================
 
-template <typename T>
-inline void MGS(cublasHandle_t handle,
-                     const T* d_evecs,
-                     T* d_h,
-                     T* d_result,
-                     int N,
-                     int num_iters,
-                     int i) {
-    constexpr T NEG_ONE = getNegOne<T>();
-    constexpr T ONE = getOne<T>();
-    constexpr T ZERO = getZero<T>();
-    for (int j = 0; j <= i; j++) {
-        // Compute projection coefficient <v_j, w> and store in H(j,i)
-        cublas::gemv<T>(handle, CUBLAS_OP_T, N, 1, &ONE,
-                   &d_evecs[j * N], N, d_result, 1,
-                   &ZERO, &d_h[i * (num_iters + 1) + j], 1);
-        
-        // Subtract projection: w = w - h_ij * v_j
-        cublas::gemv<T>(handle, CUBLAS_OP_N, N, 1, &NEG_ONE,
-                   &d_evecs[j * N], N, &d_h[i * (num_iters + 1) + j], 1,
-                   &ONE, d_result, 1);
+    // Templated Modified Gram-Schmidt for Real and Complex Types
+    template <typename T>
+    inline void MGS(cublasHandle_t handle,
+                        const T* d_evecs,
+                        T* d_h,
+                        T* d_result,
+                        int N,
+                        int num_iters,
+                        int i) {
+        constexpr T NEG_ONE = getNegOne<T>();
+        constexpr T ONE = getOne<T>();
+        constexpr T ZERO = getZero<T>();
+        constexpr bool isComplex = cuda::is_device_complex_v<T>;
+        for (int j = 0; j <= i; j++) {
+            cublas::gemv<T>(handle, isComplex ? CUBLAS_OP_C : CUBLAS_OP_T, N, 1, &ONE,
+                    &d_evecs[j * N], N, d_result, 1,
+                    &ZERO, &d_h[i * (num_iters + 1) + j], 1);
+            cublas::gemv<T>(handle, CUBLAS_OP_N, N, 1, &NEG_ONE,
+                    &d_evecs[j * N], N, &d_h[i * (num_iters + 1) + j], 1,
+                    &ONE, d_result, 1);
+        }
     }
-}
-
 
 } // namespace cublas
-
 
 
 #endif // CUDA_MANAGER_HPP

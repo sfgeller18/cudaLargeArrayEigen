@@ -8,6 +8,9 @@
     #include <cmath>
     #include <type_traits>
 
+    // #define DBG_ORTHO
+
+
     #define LAPACKPP_CHECK(call) \
     do { \
         int64_t info = (call); \
@@ -16,6 +19,20 @@
             return info; \
         } \
     } while (0)
+
+    template <typename M>
+    void mollify(M& mat) {
+        for (size_t i = 0; i < mat.rows(); ++i) {
+            for (size_t j = 0; j < mat.cols(); ++j) {
+                if (std::abs(mat(i, j).real()) < 1e-10) {
+                    mat(i, j).real(0.0);
+                }
+                if (std::abs(mat(i, j).imag()) < 1e-10) {
+                    mat(i, j).imag(0.0);
+                }
+            }
+        }
+    }
 
 
     template <typename MatrixType>
@@ -48,6 +65,13 @@
         } else {
             product = Q.transpose() * Q;
         }
+        #ifdef DBG_ORTHO
+        if (N <= 15) {
+            std::cout << "Product of Q^H * Q: " << std::endl;
+            mollify(product);
+            print(product);
+        }
+        #endif
         bool ret = (product - MatrixType::Identity(Q.cols(), Q.cols())).norm() < tol;
         std::cout << (ret ? "SUCCESS" : "FAIL") << std::endl;
         return ret;
