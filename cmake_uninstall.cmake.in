@@ -1,0 +1,17 @@
+if(NOT EXISTS "${CMAKE_BINARY_DIR}/install_manifest.txt")
+    message(FATAL_ERROR "Cannot find install_manifest.txt. Ensure the project was installed.")
+endif()
+
+file(READ "${CMAKE_BINARY_DIR}/install_manifest.txt" INSTALLED_FILES)
+
+foreach(FILE ${INSTALLED_FILES})
+    string(STRIP "${FILE}" FILE)  # Remove any extra whitespace
+    if(EXISTS "${FILE}")
+        message(STATUS "Removing file: ${FILE}")
+        file(REMOVE "${FILE}")
+    else()
+        message(WARNING "File not found: ${FILE}")
+    endif()
+endforeach()
+
+message(STATUS "Uninstallation complete.")

@@ -23,10 +23,6 @@ find_library(LAPACKE_LIB NAMES lapacke REQUIRED)
 find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
 
-# # Find LAPACK++ and BLAS++
-# set(LAPACKPP_DIR "/opt/slate/include")
-# set(BLASPP_DIR "/opt/slate/include/blas")
-
 include_directories("/opt/slate/include")  # Add include directories for LAPACK++ and BLAS++
 link_directories("/opt/slate/lib")  # Add link directory for LAPACK++ and BLAS++
 
@@ -59,4 +55,26 @@ message(STATUS "CUDA compiler: ${CMAKE_CUDA_COMPILER}")
 find_package(Eigen3 REQUIRED)
 if(Eigen3_FOUND)
     include_directories(${EIGEN3_INCLUDE_DIR})
+endif()
+
+# Install rules
+install(TARGETS cuda_demo
+    RUNTIME DESTINATION bin  # Install the binary to bin/
+)
+
+install(DIRECTORY include/
+    DESTINATION include  # Install headers to include/
+    FILES_MATCHING PATTERN "*.h"
+)
+
+# Add uninstall target
+if(NOT TARGET uninstall)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake_uninstall.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+        IMMEDIATE @ONLY
+    )
+    add_custom_target(uninstall
+        COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake
+    )
 endif()
